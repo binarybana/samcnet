@@ -5,11 +5,9 @@ int *x,**mat,*changelist,changelength;
 double *fvalue;
 {
 int **tab, **tab00;
-int **jtab, **jtab00;
 int count, count00, num, num00, i, j, k, l, m, s, tep;
 int numparent, parstate, parlist[node_num];
-double sum, alphaijk, alphaik, sum1,sum2;
-int jcount,jcount00;
+double sum, alphaijk, alphaik;
 
 
 for(m=1; m<=changelength; m++){
@@ -41,26 +39,23 @@ for(m=1; m<=changelength; m++){
     /* parent state table */
     tab=imatrix(1,(parstate+1)*state[x[i]],1,2);
     tab00=imatrix(1,parstate+1,1,2);
-    jtab=imatrix(1,(parstate+1)*state[x[i]],1,2);
-    jtab00=imatrix(1,parstate+1,1,2);
 
     for(j=1; j<=(parstate+1)*state[x[i]]; j++)
        for(l=1; l<=2; l++) tab[j][l]=0;
     for(j=1; j<=(1+parstate); j++) 
        for(l=1; l<=2; l++) tab00[j][l]=0;
     for(j=1; j<=(parstate+1)*state[x[i]]; j++) {
-       jtab[j][1]=-1;
-       jtab[j][2]=0;
+       tab[j][1]=-1;
+       tab[j][2]=0;
      }
     for(j=1; j<=parstate+1; j++) {
-       jtab00[j][1]=-1;
-       jtab00[j][2]=0;
+       tab00[j][1]=-1;
+       tab00[j][2]=0;
      }
 
 
     /* data summary: count N_{ijk} */
     count=count00=0;
-    jcount=jcount00=0;
     for(k=1; k<=data_num; k++){ 
        
         for(num00=0,s=numparent; s>=1; s--){
@@ -74,23 +69,26 @@ for(m=1; m<=changelength; m++){
         // nodes >32 or >64, we should worry about overflow.
         //
         // Also, encode just the parents values into decimal number num00
+        
+#ifdef NEW
 
         j=1;
-        while(jtab00[j][1]!=num00 && j<=jcount00) j++;
-        if(j==jcount00+1) {
-          jcount00++;
-          jtab00[j][1]=num00;
+        while(tab00[j][1]!=num00 && j<=count00) j++;
+        if(j==count00+1) {
+          count00++;
+          tab00[j][1]=num00;
         }
-        jtab00[j][2]++;
+        tab00[j][2]++;
      
         j=1;
-        while(jtab[j][1]!=num && j<=jcount) j++;
-        if(j==jcount+1) {
-          jcount++;
-          jtab[j][1]=num;
+        while(tab[j][1]!=num && j<=count) j++;
+        if(j==count+1) {
+          count++;
+          tab[j][1]=num;
         }
-        jtab[j][2]++;
+        tab[j][2]++;
      
+#else
      
         if(count00==0){
             count00++;
@@ -140,69 +138,36 @@ for(m=1; m<=changelength; m++){
                 count++;
                }
            }
+#endif
        } /* end data summary */
           
-     if(numparent==6) { 
-       printf("cost2: count=%d count00=%d\n", count, count00);
-       printf("numparent=%d parstate=%d\n", numparent, parstate);
-       /*for(k=1; k<=count; k++) printf("%d  %d %d\n",k,tab[k][1],tab[k][2]);*/
-       for(k=1; k<=count00+1; k++) printf("%d  %d %d\n",k,tab00[k][1],tab00[k][2]);
-       for(k=1; k<=jcount00+1; k++) printf("%d  %d %d\n",k,jtab00[k][1],jtab00[k][2]);
-       for(sum1=0,sum2=0,k=1; k<=count00+1;k++) {
-         sum1+=tab00[k][2];
-         sum2+=jtab00[k][2];
-       }
-       printf("tab00 sum: %f  jtab00 sum: %f \n", sum1,sum2);
+     /*if(numparent==6) { */
+       /*printf("cost2: count=%d count00=%d\n", count, count00);*/
+       /*printf("numparent=%d parstate=%d\n", numparent, parstate);*/
+       /*[>for(k=1; k<=count; k++) printf("%d  %d %d\n",k,tab[k][1],tab[k][2]);<]*/
+       /*for(k=1; k<=count00+1; k++) printf("%d  %d %d\n",k,tab00[k][1],tab00[k][2]);*/
+       /*for(k=1; k<=count00+1; k++) printf("%d  %d %d\n",k,tab00[k][1],tab00[k][2]);*/
+       /*for(sum1=0,sum2=0,k=1; k<=count00+1;k++) {*/
+         /*sum1+=tab00[k][2];*/
+         /*sum2+=tab00[k][2];*/
+       /*}*/
+       /*printf("tab00 sum: %f  tab00 sum: %f \n", sum1,sum2);*/
 
-     }
+     /*}*/
      
       
      alphaijk=prior_alpha/parstate/state[x[i]];
      alphaik=prior_alpha/parstate;
-     
-     for(sum1=0,sum2=0,k=1; k<=count00;k++) {
-       sum1+=gammln(tab00[k][2]+alphaijk);
-       sum2+=gammln(jtab00[k][2]+alphaijk);
-     }
-     assert(sum1-sum2<1e-5);
 
-     for(sum1=0,sum2=0,k=1; k<=count;k++) {
-       sum1+=gammln(tab[k][2]+alphaijk);
-       sum2+=gammln(jtab[k][2]+alphaijk);
-     }
-     assert(sum1-sum2<1e-5);
-
-     /*fvalue[i]-=jcount*gammln(alphaijk);*/
-     /*for(k=1; k<=jcount; k++) fvalue[i]+=gammln(jtab[k][2]+alphaijk);*/
+     fvalue[i]-=count*gammln(alphaijk);
+     for(k=1; k<=count; k++) fvalue[i]+=gammln(tab[k][2]+alphaijk);
          
-     /*fvalue[i]+=jcount00*gammln(alphaik);*/
-     /*for(k=1; k<=jcount00; k++) fvalue[i]-=gammln(jtab00[k][2]+alphaik);*/
-     /*fvalue[i]*=-1.0;*/
-
-     sum1=sum2=0;
-
-     sum1-=jcount*gammln(alphaijk);
-     for(k=1; k<=jcount; k++) sum1+=gammln(jtab[k][2]+alphaijk);
-         
-     sum1+=jcount00*gammln(alphaik);
-     for(k=1; k<=jcount00; k++) sum1-=gammln(jtab00[k][2]+alphaik);
-
-     sum2-=count*gammln(alphaijk);
-     for(k=1; k<=count; k++) sum2+=gammln(tab[k][2]+alphaijk);
-         
-     sum2+=count00*gammln(alphaik);
-     for(k=1; k<=count00; k++) sum2-=gammln(tab00[k][2]+alphaik);
-
-     assert(sum1-sum2 < 1e-5);
-     printf("sum diff: %g\n", sum1-sum2);
-
-     fvalue[i]+=sum2;
-     fvalue[i] *= -1.0;
+     fvalue[i]+=count00*gammln(alphaik);
+     for(k=1; k<=count00; k++) fvalue[i]-=gammln(tab00[k][2]+alphaik);
+     fvalue[i]*=-1.0;
 
      free_imatrix(tab,1,(parstate+1)*state[x[i]],1,2);
      free_imatrix(tab00,1,parstate+1,1,2);
-     free_imatrix(jtab,1,(parstate+1)*state[x[i]],1,2);
-     free_imatrix(jtab00,1,parstate+1,1,2);
    }
 
 ABC:
