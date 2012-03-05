@@ -8,10 +8,10 @@
 #define node_num        10
 
 #define total_iteration     500000
-#define burnin              500000
-#define warm_iteration      100000
+#define burnin              300000
 #define stepscale           100000
 #define WARM                     1
+//#define warm_iteration      10000
 
 static double prior_alpha=1.0, prior_gamma=0.1111;
 static int    limparent=5;

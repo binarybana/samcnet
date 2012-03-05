@@ -5,20 +5,21 @@
 #include "cost.c"
 #include "metmove2.c"
 
-main()
+int main(int argc, char **argv)
 {
 int stime;
 long ltime;
-int i, j, k0,k1,k2,s,iter, grid, Repeat;
+int i, j, k0, iter, grid, Repeat; //s,k1,k2
 int region,changelength, *changelist, *x, **mat;
 double delta,**hist,*fvalue,sum,ave,max,un;
 double **net, sinw, totalweight;
 FILE *ins, *ins2;
-char buf[255];
+/*char buf[255];*/
 
 ltime=time(NULL);
 stime=(unsigned int)ltime/2;
-srand(stime);
+/*srand(stime);*/
+srand(912345);
 
 grid=ceil((maxEE+range-lowE)*scale);
 
@@ -41,19 +42,23 @@ ins=fopen("WBCD2.dat","r");
 if(ins==NULL){ printf("can't open datafile\n"); return 1; }
 for(i=1; i<=data_num; i++){
     for(j=1; j<=node_num-1; j++){ fscanf(ins," %d",&x[j]); x[j]-=1; }
+    // subtract one to make the 9 features range from 0-9
     fscanf(ins, " %d", &x[node_num]);
-    x[node_num]+=1;
-    for(j=1; j<=node_num; j++) datax[i][j]=x[j];
+    x[node_num]+=1; // I Assume this last entry is the label {1,2}
+    for(j=1; j<=node_num; j++) datax[i][j]=x[j]; 
+    //^^ save a copy of the data (untampered)
    }
 fclose(ins);
 
-for(i=1; i<=data_num; i++){
-    for(j=1; j<=node_num; j++) printf(" %d",datax[i][j]);
-    printf("\n");
-   }
+// print the data
+/*for(i=1; i<=data_num; i++){ */
+    /*for(j=1; j<=node_num; j++) printf(" %d",datax[i][j]);*/
+    /*printf("\n");*/
+   /*}*/
 
 for(i=1; i<=node_num-1; i++) state[i]=10;
 state[node_num]=2;
+// Number of states in each column, static var
 
 /***************************/
 
@@ -84,13 +89,14 @@ for(Repeat=1; Repeat<=1; Repeat++){
     
 
     /* initialization of the network */
-    permut_sample(x,node_num);
+    permut_sample(x,node_num); //get a 1-10 permutation
     for(i=1; i<=node_num; i++)
        for(j=1; j<=node_num; j++) mat[i][j]=0;
-    for(i=1; i<=node_num; i++) mat[i][i]=1;
+    for(i=1; i<=node_num; i++) mat[i][i]=1; 
+    //^^ initialize mat to identity
      
     changelength=node_num;
-    for(i=1; i<=changelength; i++) changelist[i]=i;
+    for(i=1; i<=changelength; i++) changelist[i]=i; //changelist== 1,2,3...
     bestenergy=cost(x,mat,fvalue,changelist,changelength);
     printf("initial energy=%g\n",bestenergy);
     

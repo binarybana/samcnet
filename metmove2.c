@@ -4,11 +4,9 @@ double *fvalue,**hist,delta;
 {
 int *newx, **newmat, locrepeat=1;
 int changelength, *changelist;
-int sze2, i,j,k,k1,k2,i1,i2,j1,j2,G,accept,ok,scheme;
+int i,j,k,k1,k2,i1,i2,j1,j2,G,accept,scheme; 
 double *locfreq,*newfvalue, pxy, pyx;
-double fold, fnew, un, r, max, sum; 
-FILE *ins;
-
+double fold, fnew, un, r; 
 
    sze=floor((maxEE+range-lowE)*scale);
 

@@ -89,7 +89,6 @@ double **X;
 int n;
 {
 int j, *indx;
-FILE *ins;
 double d, logdet;
 
   indx=ivector(1,n);
@@ -108,7 +107,6 @@ int n;
 {
 double d, *col;
 int i, j, *indx;
-FILE *ins;
 double logdet;
 
 col=dvector(1,n);
@@ -143,8 +141,6 @@ int n;
 {
 double d, *col;
 int i, j, *indx;
-FILE *ins;
-double logdet;
 
 col=dvector(1,n);
 indx=ivector(1,n);
@@ -308,7 +304,7 @@ double a, b;
 int ok;
 double d, q, un, u1, y, z;
 
-if(a<=0.0 || b<=0.0) { printf("Gamma parameter error (<0.0)\n"); return; }
+if(a<=0.0 || b<=0.0) { printf("Gamma parameter error (<0.0)\n"); return -1; }
 
 if(a<1.0){  /* Ahrens, P.213 */
  ok=0;
@@ -529,7 +525,7 @@ double DLOGGAUSS(z,mean,variance,p)
 double *z, *mean, **variance;
 int p;
 {
-int i,j;
+int i;
 double logdet, sum, **mat,*vect, *mu;
 
 mat=dmatrix(1,p,1,p);
@@ -881,6 +877,7 @@ if(sq1<=0.0 || sq2<=0.0) return 0.0;
 }
 
 
+//generate permutation of integers from 1 to n
 int permut_sample(sam,n)
 int *sam, n;
 {
