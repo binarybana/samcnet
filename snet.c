@@ -9,7 +9,7 @@ int main(int argc, char **argv)
 {
 int stime;
 long ltime;
-int i, j, k0, iter, grid, Repeat; //s,k1,k2
+int i, j, l, k0, iter, grid, Repeat; //s,k1,k2
 int region,changelength, *changelist, *x, **mat;
 double delta,**hist,*fvalue,sum,ave,max,un;
 double **net, sinw, totalweight;
@@ -41,9 +41,11 @@ indicator=ivector(0,grid);
 ins=fopen("WBCD2.dat","r");
 if(ins==NULL){ printf("can't open datafile\n"); return 1; }
 for(i=1; i<=data_num; i++){
-    for(j=1; j<=node_num-1; j++){ fscanf(ins," %d",&x[j]); x[j]-=1; }
+    for(j=1; j<=node_num-1; j++){ 
+      l = fscanf(ins," %d",&x[j]); 
+      x[j]-=1; }
     // subtract one to make the 9 features range from 0-9
-    fscanf(ins, " %d", &x[node_num]);
+    l = fscanf(ins, " %d", &x[node_num]);
     x[node_num]+=1; // I Assume this last entry is the label {1,2}
     for(j=1; j<=node_num; j++) datax[i][j]=x[j]; 
     //^^ save a copy of the data (untampered)
