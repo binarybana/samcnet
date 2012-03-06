@@ -1,14 +1,84 @@
+#include <search.h>
 #include <assert.h>
+
+typedef struct {
+  int config;
+  int num;
+} my_tentry;
+
+my_tentry * make_my_tentry(int config, int num) {
+  my_tentry *mt = (my_tentry *)calloc(sizeof(my_tentry),1);
+  if(!mt){
+    printf("calloc failure\n");
+    exit(1);
+  }
+  mt->config = config;
+  mt->num = num;
+  return mt;
+}
+
+void mt_free_func(void *mt_data) {
+  my_tentry *mt = mt_data;
+  if(!mt) {
+    return;
+  }
+  free(mt_data);
+  return;
+}
+
+int mt_compare_func(const void *l, const void *r)
+{
+  const my_tentry *ml = l;
+  const my_tentry *mr = r;
+  if(ml->config < mr->config) {
+    return -1;
+  }
+  if(ml->config > mr->config) {
+    return 1;
+  }
+  return 0;
+}
+
+double accum = 0.0;
+double alphaijk = 0.0;
+double alphaik = 0.0;
+
+void mt_add_func(const void *node, VISIT order, int level) {
+
+  const my_tentry *p = *(const my_tentry **) node;
+
+  if (order == postorder || order == leaf) {
+    accum += gammln(p->num + alphaijk);
+  }
+}
+
+void mt_sub_func(const void *node, VISIT order, int level) {
+
+  const my_tentry *p = *(const my_tentry **) node;
+
+  if (order == postorder || order == leaf) {
+    accum -= gammln(p->num + alphaik);
+  }
+}
+
+void mt_print_func(const void *node, VISIT order, int level) {
+
+  const my_tentry *p = *(const my_tentry **) node;
+
+  if (order == postorder || order == leaf) {
+    printf("%d %d\n", p->config, p->num);
+  }
+}
+
+
 
 double cost(x,mat,fvalue,changelist,changelength)
 int *x,**mat,*changelist,changelength;
 double *fvalue;
 {
-int **tab, **tab00;
-int count, count00, num, num00, i, j, k, l, m, s, tep;
+int count, count00, num, num00, i, j, k, m, s, tep;
 int numparent, parstate, parlist[node_num];
-double sum, alphaijk, alphaik;
-
+double sum;
 
 for(m=1; m<=changelength; m++){
     
@@ -37,6 +107,15 @@ for(m=1; m<=changelength; m++){
     */
 
     /* parent state table */
+#ifdef TREE
+
+    void *tree = NULL, *tree00 = NULL;
+    my_tentry *re = 0, *retval = 0, *mt = 0;
+
+#else
+    int l;
+
+    int **tab, **tab00;
     tab=imatrix(1,(parstate+1)*state[x[i]],1,2);
     tab00=imatrix(1,parstate+1,1,2);
 
@@ -52,6 +131,7 @@ for(m=1; m<=changelength; m++){
        tab00[j][1]=-1;
        tab00[j][2]=0;
      }
+#endif
 
 
     /* data summary: count N_{ijk} */
@@ -88,6 +168,40 @@ for(m=1; m<=changelength; m++){
         }
         tab[j][2]++;
      
+#elif defined TREE
+
+        mt = make_my_tentry(num00,1);
+
+        retval = tsearch(mt, &tree00, mt_compare_func);
+
+        re = *(my_tentry **)retval;
+
+        if(re != mt) {
+          //already in the tree, we should add one its num
+          re->num++;
+          mt_free_func(mt);
+        } else {
+          //inserted, so we should increase count00
+          count00++;
+        }
+
+        //********************
+        //Now for num
+        mt = make_my_tentry(num,1);
+
+        retval = tsearch(mt, &tree, mt_compare_func);
+
+        re = *(my_tentry **)retval;
+
+        if(re != mt) {
+          //already in the tree, we should add one its num
+          re->num++;
+          mt_free_func(mt);
+        } else {
+          //inserted, so we should increase count
+          count++;
+        }
+          
 #else
      
         if(count00==0){
@@ -141,35 +255,56 @@ for(m=1; m<=changelength; m++){
 #endif
        } /* end data summary */
           
-     /*if(numparent==6) { */
-       /*printf("cost2: count=%d count00=%d\n", count, count00);*/
+     /*if(numparent==1) { */
+       /*printf("count: %d, count00: %d, parstate*state: %d\n",count,count00,(parstate+1)*state[x[i]]);*/
        /*printf("numparent=%d parstate=%d\n", numparent, parstate);*/
-       /*[>for(k=1; k<=count; k++) printf("%d  %d %d\n",k,tab[k][1],tab[k][2]);<]*/
-       /*for(k=1; k<=count00+1; k++) printf("%d  %d %d\n",k,tab00[k][1],tab00[k][2]);*/
+       /*twalk(tree,mt_print_func);*/
+       /*twalk(tree00,mt_print_func);*/
+       /*for(k=1; k<=count; k++) printf("%d  %d %d\n",k,tab[k][1],tab[k][2]);*/
        /*for(k=1; k<=count00+1; k++) printf("%d  %d %d\n",k,tab00[k][1],tab00[k][2]);*/
        /*for(sum1=0,sum2=0,k=1; k<=count00+1;k++) {*/
          /*sum1+=tab00[k][2];*/
          /*sum2+=tab00[k][2];*/
        /*}*/
        /*printf("tab00 sum: %f  tab00 sum: %f \n", sum1,sum2);*/
-
      /*}*/
      
-      
      alphaijk=prior_alpha/parstate/state[x[i]];
      alphaik=prior_alpha/parstate;
 
-     fvalue[i]-=count*gammln(alphaijk);
-     for(k=1; k<=count; k++) fvalue[i]+=gammln(tab[k][2]+alphaijk);
-         
-     fvalue[i]+=count00*gammln(alphaik);
-     for(k=1; k<=count00; k++) fvalue[i]-=gammln(tab00[k][2]+alphaik);
-     fvalue[i]*=-1.0;
+     accum = 0.0;
+     accum-=count*gammln(alphaijk);
+     accum+=count00*gammln(alphaik);
+
+#ifdef TREE
+
+     twalk(tree, mt_add_func);
+     twalk(tree00, mt_sub_func);
+
+     tdestroy(tree,mt_free_func);
+     tdestroy(tree00,mt_free_func);
+
+#else
+      
+     /*for(k=1; k<=count; k++) fvalue[i]+=gammln(tab[k][2]+alphaijk);*/
+     /*for(k=1; k<=count00; k++) fvalue[i]-=gammln(tab00[k][2]+alphaik);*/
+     for(k=1; k<=count; k++) accum+=gammln(tab[k][2]+alphaijk);
+     for(k=1; k<=count00; k++) accum-=gammln(tab00[k][2]+alphaik);
 
      free_imatrix(tab,1,(parstate+1)*state[x[i]],1,2);
      free_imatrix(tab00,1,parstate+1,1,2);
-   }
+#endif
 
+   fvalue[i] += accum;
+   fvalue[i]*=-1.0;
+
+
+    /*if(numparent==1){*/
+      /*printf("Numparent: %d ", numparent);*/
+      /*printf("Accum: %g\n", accum);*/
+      /*exit(1);*/
+     /*}*/
+  }
 ABC:
   for(sum=0.0,m=1; m<=node_num; m++){
       sum+=fvalue[m];
