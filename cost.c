@@ -1,6 +1,13 @@
+#define __USE_GNU 1
 #include <search.h>
 #include <assert.h>
+#include <Judy.h>
 
+double accum = 0.0;
+double alphaijk = 0.0;
+double alphaik = 0.0;
+
+#ifdef TREE
 typedef struct {
   int config;
   int num;
@@ -39,10 +46,6 @@ int mt_compare_func(const void *l, const void *r)
   return 0;
 }
 
-double accum = 0.0;
-double alphaijk = 0.0;
-double alphaik = 0.0;
-
 void mt_add_func(const void *node, VISIT order, int level) {
 
   const my_tentry *p = *(const my_tentry **) node;
@@ -70,6 +73,7 @@ void mt_print_func(const void *node, VISIT order, int level) {
   }
 }
 
+#endif
 
 
 double cost(x,mat,fvalue,changelist,changelength)
@@ -112,6 +116,11 @@ for(m=1; m<=changelength; m++){
     void *tree = NULL, *tree00 = NULL;
     my_tentry *re = 0, *retval = 0, *mt = 0;
 
+#elif defined JUDY
+    Pvoid_t  Parray = (Pvoid_t) NULL;		// empty JudyL array.
+    Pvoid_t  Parray00 = (Pvoid_t) NULL;		// empty JudyL array.
+    Word_t * Pvalue;				// value for one index.
+    Word_t   index;				// in JudyL array.
 #else
     int l;
 
@@ -202,6 +211,15 @@ for(m=1; m<=changelength; m++){
           count++;
         }
           
+#elif defined JUDY
+
+        index = (Word_t) num;
+        JLI(Pvalue, Parray, index);
+        ++(*Pvalue);
+
+        index = (Word_t) num00;
+        JLI(Pvalue, Parray00, index);
+        ++(*Pvalue);
 #else
      
         if(count00==0){
@@ -255,11 +273,34 @@ for(m=1; m<=changelength; m++){
 #endif
        } /* end data summary */
           
-     /*if(numparent==1) { */
-       /*printf("count: %d, count00: %d, parstate*state: %d\n",count,count00,(parstate+1)*state[x[i]]);*/
-       /*printf("numparent=%d parstate=%d\n", numparent, parstate);*/
-       /*twalk(tree,mt_print_func);*/
-       /*twalk(tree00,mt_print_func);*/
+    if(numparent>8){
+      printf("p %d ", numparent);
+    }
+#ifdef DEBUG
+     if(numparent==1) { 
+       printf("count: %d, count00: %d, parstate*state: %d\n",count,count00,(parstate+1)*state[x[i]]);
+       printf("numparent=%d parstate=%d\n", numparent, parstate);
+#ifdef JUDY
+     index = 0;
+     JLF(Pvalue, Parray, index);
+     while (Pvalue != NULL)
+     {
+       printf("%lu %lu\n",index, *Pvalue);
+       JLN(Pvalue, Parray, index);
+     }
+
+     index = 0;
+     JLF(Pvalue, Parray00, index);
+     while (Pvalue != NULL)
+     {
+       printf("%lu %lu\n",index, *Pvalue);
+       JLN(Pvalue, Parray00, index);
+     }
+#elif defined TREE 
+
+       twalk(tree,mt_print_func);
+       twalk(tree00,mt_print_func);
+#endif // judy or tree
        /*for(k=1; k<=count; k++) printf("%d  %d %d\n",k,tab[k][1],tab[k][2]);*/
        /*for(k=1; k<=count00+1; k++) printf("%d  %d %d\n",k,tab00[k][1],tab00[k][2]);*/
        /*for(sum1=0,sum2=0,k=1; k<=count00+1;k++) {*/
@@ -267,7 +308,14 @@ for(m=1; m<=changelength; m++){
          /*sum2+=tab00[k][2];*/
        /*}*/
        /*printf("tab00 sum: %f  tab00 sum: %f \n", sum1,sum2);*/
-     /*}*/
+     exit(0);
+     }
+#endif //debug
+
+#ifdef JUDY
+    JLC(count, Parray, 0,-1);
+    JLC(count00, Parray00, 0,-1);
+#endif
      
      alphaijk=prior_alpha/parstate/state[x[i]];
      alphaik=prior_alpha/parstate;
@@ -284,7 +332,27 @@ for(m=1; m<=changelength; m++){
      tdestroy(tree,mt_free_func);
      tdestroy(tree00,mt_free_func);
 
-#else
+#elif defined JUDY
+
+     index = 0;
+     JLF(Pvalue, Parray, index);
+     while (Pvalue != NULL)
+     {
+       accum+=gammln((*Pvalue) + alphaijk);
+       JLN(Pvalue, Parray, index);
+     }
+
+     index = 0;
+     JLF(Pvalue, Parray00, index);
+     while (Pvalue != NULL)
+     {
+       accum-=gammln((*Pvalue) + alphaik);
+       JLN(Pvalue, Parray00, index);
+     }
+
+     JLFA(count, Parray);
+     JLFA(count00, Parray00);
+#else // normal
       
      /*for(k=1; k<=count; k++) fvalue[i]+=gammln(tab[k][2]+alphaijk);*/
      /*for(k=1; k<=count00; k++) fvalue[i]-=gammln(tab00[k][2]+alphaik);*/
