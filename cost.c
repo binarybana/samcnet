@@ -1,94 +1,21 @@
-#define __USE_GNU 1
-#include <search.h>
-#include <assert.h>
 #include <Judy.h>
 
-double accum = 0.0;
-double alphaijk = 0.0;
-double alphaik = 0.0;
-
-#ifdef TREE
-typedef struct {
-  int config;
-  int num;
-} my_tentry;
-
-my_tentry * make_my_tentry(int config, int num) {
-  my_tentry *mt = (my_tentry *)calloc(sizeof(my_tentry),1);
-  if(!mt){
-    printf("calloc failure\n");
-    exit(1);
-  }
-  mt->config = config;
-  mt->num = num;
-  return mt;
-}
-
-void mt_free_func(void *mt_data) {
-  my_tentry *mt = mt_data;
-  if(!mt) {
-    return;
-  }
-  free(mt_data);
-  return;
-}
-
-int mt_compare_func(const void *l, const void *r)
+double cost(int *x, int **mat, double *fvalue, int *changelist, int changelength)
 {
-  const my_tentry *ml = l;
-  const my_tentry *mr = r;
-  if(ml->config < mr->config) {
-    return -1;
-  }
-  if(ml->config > mr->config) {
-    return 1;
-  }
-  return 0;
-}
+  int count, count00, num, num00, i, j, k, m, s, tep;
+  int numparent, parstate, parlist[node_num];
+  double sum;
+  double accum = 0.0;
+  double alphaijk = 0.0;
+  double alphaik = 0.0;
 
-void mt_add_func(const void *node, VISIT order, int level) {
-
-  const my_tentry *p = *(const my_tentry **) node;
-
-  if (order == postorder || order == leaf) {
-    accum += gammln(p->num + alphaijk);
-  }
-}
-
-void mt_sub_func(const void *node, VISIT order, int level) {
-
-  const my_tentry *p = *(const my_tentry **) node;
-
-  if (order == postorder || order == leaf) {
-    accum -= gammln(p->num + alphaik);
-  }
-}
-
-void mt_print_func(const void *node, VISIT order, int level) {
-
-  const my_tentry *p = *(const my_tentry **) node;
-
-  if (order == postorder || order == leaf) {
-    printf("%d %d\n", p->config, p->num);
-  }
-}
-
-#endif
-
-
-double cost(x,mat,fvalue,changelist,changelength)
-int *x,**mat,*changelist,changelength;
-double *fvalue;
-{
-int count, count00, num, num00, i, j, k, m, s, tep;
-int numparent, parstate, parlist[node_num];
-double sum;
-
-for(m=1; m<=changelength; m++){
+  for(m=1; m<=changelength; m++){
     
-    i=changelist[m]; 
+    i = changelist[m]; 
 
-    parstate=1; s=0;
+    parstate = 1; 
+    s = 0;
+
     for(j=1; j<i; j++){
         if(mat[j][i]==1){ 
            parstate*=state[x[j]]; //accumulating the total number of parent sattes
@@ -96,9 +23,11 @@ for(m=1; m<=changelength; m++){
            parlist[s]=x[j]; //parent list
          }
        }
-    numparent=s; // tot num of parents
+
+    numparent = s; // tot num of parents
+
     // Structure Prior, in log form:
-    fvalue[i]=numparent*log(prior_gamma);
+    fvalue[i] = numparent*log(prior_gamma);
 
     // Number of parents limited to limparent
     if(numparent>limparent){ 
@@ -111,37 +40,10 @@ for(m=1; m<=changelength; m++){
     */
 
     /* parent state table */
-#ifdef TREE
-
-    void *tree = NULL, *tree00 = NULL;
-    my_tentry *re = 0, *retval = 0, *mt = 0;
-
-#elif defined JUDY
     Pvoid_t  Parray = (Pvoid_t) NULL;		// empty JudyL array.
     Pvoid_t  Parray00 = (Pvoid_t) NULL;		// empty JudyL array.
     Word_t * Pvalue;				// value for one index.
     Word_t   index;				// in JudyL array.
-#else
-    int l;
-
-    int **tab, **tab00;
-    tab=imatrix(1,(parstate+1)*state[x[i]],1,2);
-    tab00=imatrix(1,parstate+1,1,2);
-
-    for(j=1; j<=(parstate+1)*state[x[i]]; j++)
-       for(l=1; l<=2; l++) tab[j][l]=0;
-    for(j=1; j<=(1+parstate); j++) 
-       for(l=1; l<=2; l++) tab00[j][l]=0;
-    for(j=1; j<=(parstate+1)*state[x[i]]; j++) {
-       tab[j][1]=-1;
-       tab[j][2]=0;
-     }
-    for(j=1; j<=parstate+1; j++) {
-       tab00[j][1]=-1;
-       tab00[j][2]=0;
-     }
-#endif
-
 
     /* data summary: count N_{ijk} */
     count=count00=0;
@@ -149,7 +51,8 @@ for(m=1; m<=changelength; m++){
        
         for(num00=0,s=numparent; s>=1; s--){
             tep=1;
-            for(j=1; j<s; j++) tep*=10; //FIXME Shouldn't this be state[x[i]] instead of 10?
+            for(j=1; j<s; j++) tep*=10; 
+            //FIXME Shouldn't this be state[x[i]] instead of 10?
             num00+=datax[k][parlist[s]]*tep; 
            }
         num=num00*10+datax[k][x[i]]; 
@@ -159,59 +62,6 @@ for(m=1; m<=changelength; m++){
         //
         // Also, encode just the parents values into decimal number num00
         
-#ifdef NEW
-
-        j=1;
-        while(tab00[j][1]!=num00 && j<=count00) j++;
-        if(j==count00+1) {
-          count00++;
-          tab00[j][1]=num00;
-        }
-        tab00[j][2]++;
-     
-        j=1;
-        while(tab[j][1]!=num && j<=count) j++;
-        if(j==count+1) {
-          count++;
-          tab[j][1]=num;
-        }
-        tab[j][2]++;
-     
-#elif defined TREE
-
-        mt = make_my_tentry(num00,1);
-
-        retval = tsearch(mt, &tree00, mt_compare_func);
-
-        re = *(my_tentry **)retval;
-
-        if(re != mt) {
-          //already in the tree, we should add one its num
-          re->num++;
-          mt_free_func(mt);
-        } else {
-          //inserted, so we should increase count00
-          count00++;
-        }
-
-        //********************
-        //Now for num
-        mt = make_my_tentry(num,1);
-
-        retval = tsearch(mt, &tree, mt_compare_func);
-
-        re = *(my_tentry **)retval;
-
-        if(re != mt) {
-          //already in the tree, we should add one its num
-          re->num++;
-          mt_free_func(mt);
-        } else {
-          //inserted, so we should increase count
-          count++;
-        }
-          
-#elif defined JUDY
 
         index = (Word_t) num;
         JLI(Pvalue, Parray, index);
@@ -220,57 +70,6 @@ for(m=1; m<=changelength; m++){
         index = (Word_t) num00;
         JLI(Pvalue, Parray00, index);
         ++(*Pvalue);
-#else
-     
-        if(count00==0){
-            count00++;
-            tab00[count00][1]=num00;
-            tab00[count00][2]+=1;
-           }
-        //tab00 and count00 only care about parent states.
-        //first row of tab00 is the encoded parent configuration
-        //second row of tab00 is the emprical count of the above configuration
-        //count00 is the number of unique parent configs witnessed
-          else{
-            j=1;
-            while(tab00[j][1]<num00 && j<=count00) j++;
-
-            if(tab00[j][1]==num00) tab00[j][2]+=1;
-               else{
-                 //below: Insert the config,count tuple into the tab00 matrix
-                 //so it remains sorted on the configs in the first row
-                for(l=count00; l>=j; l--){
-                    tab00[l+1][1]=tab00[l][1];
-                    tab00[l+1][2]=tab00[l][2];
-                   }
-                tab00[j][1]=num00; tab00[j][2]=1;
-                count00++;
-               }
-           }
-
-
-          // Now, do the same thing, but with state configurations included in
-          // the encoded representation
-        if(count==0){
-            count++;
-            tab[count][1]=num; 
-            tab[count][2]+=1;
-           }
-          else{ 
-            j=1;
-            while(tab[j][1]<num && j<=count) j++; 
-            
-            if(tab[j][1]==num) tab[j][2]+=1;
-               else{ 
-                for(l=count; l>=j; l--){ 
-                    tab[l+1][1]=tab[l][1]; 
-                    tab[l+1][2]=tab[l][2]; 
-                   } 
-                tab[j][1]=num; tab[j][2]=1;
-                count++;
-               }
-           }
-#endif
        } /* end data summary */
           
     if(numparent>8){
@@ -278,9 +77,10 @@ for(m=1; m<=changelength; m++){
     }
 #ifdef DEBUG
      if(numparent==1) { 
-       printf("count: %d, count00: %d, parstate*state: %d\n",count,count00,(parstate+1)*state[x[i]]);
+       printf("count: %d, count00: %d, parstate*state: %d\n",
+           count,count00,(parstate+1)*state[x[i]]);
        printf("numparent=%d parstate=%d\n", numparent, parstate);
-#ifdef JUDY
+
      index = 0;
      JLF(Pvalue, Parray, index);
      while (Pvalue != NULL)
@@ -296,82 +96,43 @@ for(m=1; m<=changelength; m++){
        printf("%lu %lu\n",index, *Pvalue);
        JLN(Pvalue, Parray00, index);
      }
-#elif defined TREE 
 
-       twalk(tree,mt_print_func);
-       twalk(tree00,mt_print_func);
-#endif // judy or tree
-       /*for(k=1; k<=count; k++) printf("%d  %d %d\n",k,tab[k][1],tab[k][2]);*/
-       /*for(k=1; k<=count00+1; k++) printf("%d  %d %d\n",k,tab00[k][1],tab00[k][2]);*/
-       /*for(sum1=0,sum2=0,k=1; k<=count00+1;k++) {*/
-         /*sum1+=tab00[k][2];*/
-         /*sum2+=tab00[k][2];*/
-       /*}*/
-       /*printf("tab00 sum: %f  tab00 sum: %f \n", sum1,sum2);*/
      exit(0);
      }
 #endif //debug
 
-#ifdef JUDY
     JLC(count, Parray, 0,-1);
     JLC(count00, Parray00, 0,-1);
-#endif
      
-     alphaijk=prior_alpha/parstate/state[x[i]];
-     alphaik=prior_alpha/parstate;
+    alphaijk=prior_alpha/parstate/state[x[i]];
+    alphaik=prior_alpha/parstate;
 
-     accum = 0.0;
-     accum-=count*gammln(alphaijk);
-     accum+=count00*gammln(alphaik);
+    accum = 0.0;
+    accum-=count*gammln(alphaijk);
+    accum+=count00*gammln(alphaik);
 
-#ifdef TREE
+    index = 0;
+    JLF(Pvalue, Parray, index);
+    while (Pvalue != NULL)
+    {
+     accum+=gammln((*Pvalue) + alphaijk);
+     JLN(Pvalue, Parray, index);
+    }
 
-     twalk(tree, mt_add_func);
-     twalk(tree00, mt_sub_func);
+    index = 0;
+    JLF(Pvalue, Parray00, index);
+    while (Pvalue != NULL)
+    {
+     accum-=gammln((*Pvalue) + alphaik);
+     JLN(Pvalue, Parray00, index);
+    }
 
-     tdestroy(tree,mt_free_func);
-     tdestroy(tree00,mt_free_func);
-
-#elif defined JUDY
-
-     index = 0;
-     JLF(Pvalue, Parray, index);
-     while (Pvalue != NULL)
-     {
-       accum+=gammln((*Pvalue) + alphaijk);
-       JLN(Pvalue, Parray, index);
-     }
-
-     index = 0;
-     JLF(Pvalue, Parray00, index);
-     while (Pvalue != NULL)
-     {
-       accum-=gammln((*Pvalue) + alphaik);
-       JLN(Pvalue, Parray00, index);
-     }
-
-     JLFA(count, Parray);
-     JLFA(count00, Parray00);
-#else // normal
-      
-     /*for(k=1; k<=count; k++) fvalue[i]+=gammln(tab[k][2]+alphaijk);*/
-     /*for(k=1; k<=count00; k++) fvalue[i]-=gammln(tab00[k][2]+alphaik);*/
-     for(k=1; k<=count; k++) accum+=gammln(tab[k][2]+alphaijk);
-     for(k=1; k<=count00; k++) accum-=gammln(tab00[k][2]+alphaik);
-
-     free_imatrix(tab,1,(parstate+1)*state[x[i]],1,2);
-     free_imatrix(tab00,1,parstate+1,1,2);
-#endif
+    JLFA(count, Parray);
+    JLFA(count00, Parray00);
 
    fvalue[i] += accum;
-   fvalue[i]*=-1.0;
+   fvalue[i] *= -1.0;
 
-
-    /*if(numparent==1){*/
-      /*printf("Numparent: %d ", numparent);*/
-      /*printf("Accum: %g\n", accum);*/
-      /*exit(1);*/
-     /*}*/
   }
 ABC:
   for(sum=0.0,m=1; m<=node_num; m++){
