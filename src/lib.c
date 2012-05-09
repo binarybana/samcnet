@@ -1,15 +1,22 @@
+#ifndef _LIB_C_
+#define _LIB_C_
 
 #include <math.h>
+#include <stdlib.h>
+#include <stdio.h>
+
+#include "nrutil.h"
+
+#define pi 3.14159265
 
 #define TINY 1.0e-20;
-
-void ludcmp(a,n,indx,d)
-int n,*indx;
-double **a,*d;
+void 
+ludcmp (double **a, int n, int *indx, double *d)
 {
 	int i,imax,j,k;
 	double big,dum,sum,temp;
 	double *vv;
+	imax = -1;
 
 	vv=dvector(1,n);
 	*d=1.0;
@@ -59,9 +66,8 @@ double **a,*d;
 #undef TINY
 
 
-void lubksb(a,n,indx,b)
-double **a,*b;
-int n,*indx;
+void 
+lubksb (double **a, int n, int *indx, double *b)
 {
 	int i,ii=0,ip,j;
 	double sum;
@@ -84,9 +90,8 @@ int n,*indx;
 
 
 
-double matrix_logdet(X, n)
-double **X;
-int n;
+double 
+matrix_logdet (double **X, int n)
 {
 int j, *indx;
 double d, logdet;
@@ -101,9 +106,8 @@ double d, logdet;
 
 
 /* Y=inv(X), return d=log(det(X)) */ 
-double matrix_inverse(X, Y, n)
-double **X, **Y;
-int n;
+double 
+matrix_inverse (double **X, double **Y, int n)
 {
 double d, *col;
 int i, j, *indx;
@@ -135,9 +139,8 @@ return logdet;
 
 
 /* Y=inv(X), return d=log(det(X)) */
-int matrix_inverse_diag(X, Y, diag, n)
-double **X, **Y, *diag;
-int n;
+int 
+matrix_inverse_diag (double **X, double **Y, double *diag, int n)
 {
 double d, *col;
 int i, j, *indx;
@@ -165,9 +168,8 @@ return 0;
 
 
 
-double matrix_trace(A,p)
-double **A;
-int p;
+double 
+matrix_trace (double **A, int p)
 {
 int i;
 double sum;
@@ -178,9 +180,8 @@ return sum;
 }
 
 
-int matrix_sum(A,B,C,n,p)
-double **A, **B, **C;
-int n, p;
+int 
+matrix_sum (double **A, double **B, double **C, int n, int p)
 {
 int i, j;
 for(i=1; i<=n; i++)
@@ -190,9 +191,8 @@ return 0;
 
 
 /* Matrix: A: n by p; B: p by m;  C: n by m */
-int matrix_multiply(A,B,C,n,p,m)
-double **A, **B, **C;
-int n, p, m;
+int 
+matrix_multiply (double **A, double **B, double **C, int n, int p, int m)
 {
 int i, j, k;
 for(i=1; i<=n; i++)
@@ -204,9 +204,8 @@ return 0;
 }
 
 
-int matrix_vector_prod(A,b,d,n,p)
-double **A, *b, *d;
-int n,p;
+int 
+matrix_vector_prod (double **A, double *b, double *d, int n, int p)
 {
 int i,j;
 for(i=1; i<=n; i++){
@@ -217,17 +216,15 @@ return 0;
 }
 
 
-void copy_vector(a,b,p)
-double *a, *b;
-int p;
+void 
+copy_vector (double *a, double *b, int p)
 {
 int i;
 for(i=1; i<=p; i++) b[i]=a[i];
 }
                                                                                                                                          
-void copy_matrix(a,b,n,p)
-double **a,**b;
-int n, p;
+void 
+copy_matrix (double **a, double **b, int n, int p)
 {
 int i, j;
 for(i=1; i<=n; i++)
@@ -235,10 +232,8 @@ for(i=1; i<=n; i++)
 }
 
 
-int choldc(a, n, D)
-double **a;
-int n;
-double **D;
+int 
+choldc (double **a, int n, double **D)
 {
 int i, j, k;
 double sum, *p;
@@ -264,8 +259,8 @@ for(i=1; i<=n; i++){
 
 
 /* calculate log(Gamma(s))  */
-double loggamma(xx)
-double xx;
+double 
+loggamma (double xx)
 {
         double x,tmp,ser;
         static double cof[6]={76.18009173,-86.50532033,24.01409822,
@@ -285,8 +280,8 @@ double xx;
 
 
 /* calculate log(k!) */
-double logpum(k)
-int k;
+double 
+logpum (int k)
 {
 double value;
 int i;
@@ -298,8 +293,8 @@ return value;
 
 
 /* generate the random variable form Gamma(a,b) */
-double Rgamma(a,b)
-double a, b;
+double 
+Rgamma (double a, double b)
 {
 int ok;
 double d, q, un, u1, y, z;
@@ -343,8 +338,8 @@ return z/b;
 
 /* Generate a random variable from Beta(1,k), where
   the first parameter is 1, the second parameter is b */
-double Rbeta(b)
-double b;
+double 
+Rbeta (double b)
 {
 double un;
 un=0.0;
@@ -354,9 +349,8 @@ return 1.0-exp(1.0/b*log(un));
 
 
 /* Generate deviates from Dirichlet(a1,a2,\ldots,a_k) */
-int RDirichlet(w,a,k)
-double *w,*a;
-int k;
+int 
+RDirichlet (double *w, double *a, int k)
 {
 double sum;
 int i;
@@ -369,7 +363,8 @@ return 0;
 }
 
 
-double gasdev()
+double 
+gasdev (void)
 {
         static int iset=0;
         static double gset;
@@ -392,8 +387,8 @@ double gasdev()
 }
 
 
-double Rgasdev(mean,variance)
-double mean,variance;
+double 
+Rgasdev (double mean, double variance)
 {
         static int iset=0;
         static double gset;
@@ -416,9 +411,8 @@ double mean,variance;
 }
 
 
-int RNORM(x,mu,Sigma,p)
-double *x,*mu,**Sigma;
-int p;
+int 
+RNORM (double *x, double *mu, double **Sigma, int p)
 {
 int i, j;
 double **D, *z;
@@ -441,9 +435,8 @@ return 0;
 }
 
 
-int Rwishart(B,df,Sigma,p)
-double **B,df,**Sigma;
-int p;
+int 
+Rwishart (double **B, double df, double **Sigma, int p)
 {
 double **Z, **A, *Y;
 int i, j, k;
@@ -491,8 +484,8 @@ return 0;
 
 
 /* calculated the log-density of  z~gamma(a,b) */
-double dloggamma(x,a,b)
-double x,a,b;
+double 
+dloggamma (double x, double a, double b)
 {
 double logcon, den;
 logcon=loggamma(a);
@@ -501,8 +494,8 @@ return den;
 }
 
 
-double dloggauss(z,mean,variance)
-double z,mean,variance;
+double 
+dloggauss (double z, double mean, double variance)
 {
 double sum;
 sum=-0.5*log(2.0*pi*variance);
@@ -510,9 +503,11 @@ sum+=-0.5*(z-mean)*(z-mean)/variance;
 return sum;
 }
 
-double dlogstudent(z,k)
-double z;
-int k;  /* the degree of freedom */
+double 
+dlogstudent (
+    double z,
+    int k  /* the degree of freedom */
+)
 {
 double logprob;
 logprob=-0.5*(k+1)*log(1.0+z*z/k);
@@ -521,9 +516,8 @@ return logprob;
 
 
 
-double DLOGGAUSS(z,mean,variance,p)
-double *z, *mean, **variance;
-int p;
+double 
+DLOGGAUSS (double *z, double *mean, double **variance, int p)
 {
 int i;
 double logdet, sum, **mat,*vect, *mu;
@@ -548,9 +542,8 @@ return sum;
 }
 
 
-double Dlogwishart(D,df,Sigma,p)
-double **D,df,**Sigma;
-int p;
+double 
+Dlogwishart (double **D, double df, double **Sigma, int p)
 {
 int i, j;
 double a, sum, logdet1, logdet2, **mt1, **mt2;
@@ -587,9 +580,8 @@ return sum;
 }
 
 
-int uniform_direction(d, n)
-double *d;
-int n;
+int 
+uniform_direction (double *d, int n)
 {
 double sum;
 int k;
@@ -605,9 +597,8 @@ return 0;
  }
 
 
-int dmaxclass(z,n)
-double *z;
-int n;
+int 
+dmaxclass (double *z, int n)
 {
 int i, maxi;
 double maxd;
@@ -619,8 +610,8 @@ for(i=2; i<=n; i++)
 return maxi;
 }
                                                                                                                                          
-int imaxclass(z,n)
-int *z, n;
+int 
+imaxclass (int *z, int n)
 {
 int i, maxi;
 int maxd;
@@ -633,8 +624,8 @@ return maxi;
 }
 
 
-int binary_trans(k,l,d)
-int k, l,*d;
+int 
+binary_trans (int k, int l, int *d)
 {
 int i, j;
 for(i=1; i<=l; i++) d[i]=0;
@@ -648,8 +639,8 @@ return 0;
 }
                                                                                                                                          
                                                                                                                                          
-double logsum(a,b)
-        double a, b;
+double 
+logsum (double a, double b)
 {
         double sum;
         if(a>b) sum=a+log(1.0+exp(b-a));
@@ -658,9 +649,8 @@ double logsum(a,b)
 }
 
 
-double maxvector(x,n)
- double *x;
- int n;
+double 
+maxvector (double *x, int n)
 {
 double max;
 int i;
@@ -671,9 +661,8 @@ int i;
  }
 
 
-double minvector(x,n)
- double *x;
- int n;
+double 
+minvector (double *x, int n)
 {
 double min;
 int i;
@@ -685,9 +674,8 @@ int i;
 
                                                                                                                                          
                                                                                                                                          
-double sample_variance(x,n)
-double *x;
-int n;
+double 
+sample_variance (double *x, int n)
 {
 int i;
 double sum1, sum2, mean, var;
@@ -706,8 +694,8 @@ return var;
 
 
 /* Return the value ln[Gamma(xx)] for xx>0 */
-double gammln(xx)
-double xx;
+double 
+gammln (double xx)
 {
         double x,tmp,ser;
         static double cof[6]={76.18009173,-86.50532033,24.01409822,
@@ -728,8 +716,8 @@ double xx;
 
 #define ITMAX 100
 #define EPS 3.0e-7
-void gser(gamser,a,x,gln)
-double a,x,*gamser,*gln;
+void 
+gser (double *gamser, double a, double x, double *gln)
 {
 	int n;
 	double sum,del,ap;
@@ -762,8 +750,8 @@ double a,x,*gamser,*gln;
 
 #define ITMAX 100
 #define EPS 3.0e-7
-void gcf(gammcf,a,x,gln)
-double a,x,*gammcf,*gln;
+void 
+gcf (double *gammcf, double a, double x, double *gln)
 {
 	int n;
 	double gold=0.0,g,fac=1.0,b1=1.0;
@@ -797,8 +785,8 @@ double a,x,*gammcf,*gln;
 #undef EPS
 
 
-double gammp(a,x)
-double a,x;
+double 
+gammp (double a, double x)
 {
         double gamser,gammcf,gln;
         /* void gser(),gcf(),nrerror(); */
@@ -816,8 +804,8 @@ double a,x;
 
 
 /* Return the CDF of the standard normal distribution */
-double Gaussp(x)
-double x;
+double 
+Gaussp (double x)
 {
 double s, prob;
 
@@ -831,8 +819,8 @@ return prob;
 
 /* return Gamma'(z)/Gamma(z)   */
 /* Refer to "mathematics handbook pp.287" */
-double diGamma(z)
-double z;
+double 
+diGamma (double z)
 {
 int i;
 double sum, delta, epsilon=3.0e-7;
@@ -851,9 +839,8 @@ while(delta>epsilon){
 return sum;
 }
 
-double correlation(z1,z2,p)
-double *z1, *z2;
-int p;
+double 
+correlation (double *z1, double *z2, int p)
 {
 double ave1, ave2, sq1, sq2, sum;
 int i;
@@ -878,8 +865,8 @@ if(sq1<=0.0 || sq2<=0.0) return 0.0;
 
 
 //generate permutation of integers from 1 to n
-int permut_sample(sam,n)
-int *sam, n;
+int 
+permut_sample (int *sam, int n)
 {
 int j,k,u,v,*b;
 
@@ -897,4 +884,4 @@ int j,k,u,v,*b;
    
    return 0;
  }
-
+#endif //_LIB_C
