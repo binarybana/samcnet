@@ -26,9 +26,11 @@ typedef struct {
   double accept_loc,total_loc;
 } simResults;
 
-void test(int *data);
-void test2(int **data);
+simParams* pyInitSimParams(int rows, int cols, double *refden, int *states, char *data);
+simResults* pyInitSimResults(simParams*);
+void freeSimResults(simParams*, simResults* results);
 simParams* initSimParams(int rows, int cols, int *states, int **data);
+void copyParamData(simParams* params, double *refden, int *states, char *data);
 int freeSimParams(simParams *params);
 int run(simParams* params, simResults* results);
 

@@ -21,8 +21,34 @@ cdef extern from "snet.h":
       double *bestfvalue, bestenergy
       double accept_loc,total_loc
 
-    void test(int *data)
-    void test2(int **data)
-    simParams* initSimParams(int rows, int cols, int *states, int **data)
+    void copyParamData(simParams* params, double *refden, int *states, char *data)
+    simResults* pyInitSimResults(simParams*)
+
     int freeSimParams(simParams *params)
+    void freeSimResults(simParams*, simResults* results)
+
     int run(simParams* params, simResults* results)
+
+    #simParams* initSimParams(int rows, int cols, int *states, int **data)
+    #simParams* pyInitSimParams(int rows, int cols, double *refden, int *states, char *data)
+
+
+cdef extern from "metmove.h":
+    int metmove(simParams *params, 
+                simResults *results, 
+                int *x,
+                int **mat,
+                double *fvalue,
+                double **hist,
+                double delta,
+                int *region)
+
+cdef extern from "cost.h":
+    double cost(simParams *params,
+                simResults *results,
+                int *x, 
+                int **mat, 
+                double *fvalue, 
+                int *changelist, 
+                int changelength)
+

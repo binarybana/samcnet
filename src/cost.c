@@ -21,6 +21,9 @@ double cost(simParams *params,
 
   for(m=1; m<=changelength; m++){
     
+#ifdef DEBUG
+printf("c1\n");
+#endif
     i = changelist[m]; 
 
     parstate = 1; 
@@ -110,7 +113,6 @@ double cost(simParams *params,
        JLN(Pvalue, Parray00, index);
      }
 
-     exit(0);
      }
 #endif //debug
 

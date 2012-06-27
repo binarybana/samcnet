@@ -21,6 +21,9 @@ int i,j,k,k1,k2,i1,i2,j1,j2,G,accept,scheme;
 double *locfreq,*newfvalue, pxy, pyx;
 double fold, fnew, un, r; 
 
+#ifdef DEBUG
+printf("m1\n");
+#endif
    results->sze=floor((params->maxEE+params->range-params->lowE)*params->scale);
 
    locfreq=dvector(0,results->sze);
@@ -51,6 +54,9 @@ double fold, fnew, un, r;
     if(un<1.0/3) scheme=1;
        else if(un<2.0/3) scheme=2;
           else scheme=3;
+#ifdef DEBUG
+printf("m2\n");
+#endif
 
    if(scheme==1){ /* temporal order change */
       
@@ -132,6 +138,9 @@ double fold, fnew, un, r;
  
     
   /* acceptance of new moves */
+#ifdef DEBUG
+printf("m3\n");
+#endif
 
      if(fnew>params->maxEE+params->range) k2=results->sze;
        else if(fnew<params->lowE) k2=0;

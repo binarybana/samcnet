@@ -30,9 +30,11 @@ def build(bld):
 
     CFLAGS = ['-Wall','-std=c99']
     LDFLAGS = []
+    CYTHONFLAGS = []
     if bld.options.debug:
         print('Beginning debug build')
-        CFLAGS += ['-g']
+        CFLAGS += ['-g','-DDEBUG']
+        CYTHONFLAGS += ['--gdb']
         LDFLAGS += ['-g']
     if bld.options.prof:
         print('Adding profiling flag build')
@@ -40,6 +42,8 @@ def build(bld):
         LDFLAGS += ['-pg']
     if not bld.options.prof and not bld.options.debug: 
         CFLAGS += ['-O2']
+
+    bld.env.CYTHONFLAGS = CYTHONFLAGS
 
     libs = 'JUDY MATH'.split()
     #bld.program(source=bld.path.ant_glob('src/*.c'), 
