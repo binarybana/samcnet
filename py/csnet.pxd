@@ -17,7 +17,7 @@ cdef extern from "snet.h":
       double *refden
 
     ctypedef struct simResults:
-      int sze, *bestx, **bestmat, *indicator, nonempty
+      int sze, *bestx, **bestmat, *indicator, nonempty, calcs
       double *bestfvalue, bestenergy
       double accept_loc,total_loc
 
@@ -27,8 +27,7 @@ cdef extern from "snet.h":
     int freeSimParams(simParams *params)
     void freeSimResults(simParams*, simResults* results)
 
-    int run(simParams* params, simResults* results)
-
+    #int run(simParams* params, simResults* results)
     #simParams* initSimParams(int rows, int cols, int *states, int **data)
     #simParams* pyInitSimParams(int rows, int cols, double *refden, int *states, char *data)
 

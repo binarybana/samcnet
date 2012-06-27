@@ -19,17 +19,16 @@ double cost(simParams *params,
   double alphaijk = 0.0;
   double alphaik = 0.0;
 
-  for(m=1; m<=changelength; m++){
+  /*printf("cl: %d ", changelength);*/
+  results->calcs += changelength;
+  for(m=0; m<changelength; m++){
     
-#ifdef DEBUG
-printf("c1\n");
-#endif
     i = changelist[m]; 
 
     parstate = 1; 
     s = 0;
 
-    for(j=1; j<i; j++){
+    for(j=0; j<i-1; j++){
         if(mat[j][i]==1){ 
            parstate*=params->state[x[j]]; //accumulating the total number of parent sattes
            s++;
@@ -44,7 +43,7 @@ printf("c1\n");
 
     // Number of parents limited to limparent
     if(numparent>params->limparent){ 
-       for(j=1; j<=params->node_num; j++) fvalue[j]=1.0e+100;
+       for(j=0; j<params->node_num; j++) fvalue[j]=1.0e+100;
        goto ABC;
       }
     
@@ -60,7 +59,7 @@ printf("c1\n");
 
     /* data summary: count N_{ijk} */
     count=count00=0;
-    for(k=1; k<=params->data_num; k++){ 
+    for(k=0; k<params->data_num; k++){ 
        
         for(num00=0,s=numparent; s>=1; s--){
             tep=1;
@@ -150,7 +149,7 @@ printf("c1\n");
 
   }
 ABC:
-  for(sum=0.0,m=1; m<=params->node_num; m++){
+  for(sum=0.0,m=0; m<params->node_num; m++){
       sum+=fvalue[m];
      }
 

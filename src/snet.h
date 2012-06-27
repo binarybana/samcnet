@@ -21,7 +21,7 @@ typedef struct {
 
 typedef struct {
   int sze, *bestx, **bestmat, 
-         *indicator, nonempty;
+         *indicator, nonempty, calcs;
   double *bestfvalue, bestenergy;
   double accept_loc,total_loc;
 } simResults;
@@ -32,6 +32,6 @@ void freeSimResults(simParams*, simResults* results);
 simParams* initSimParams(int rows, int cols, int *states, int **data);
 void copyParamData(simParams* params, double *refden, int *states, char *data);
 int freeSimParams(simParams *params);
-int run(simParams* params, simResults* results);
+//int run(simParams* params, simResults* results);
 
 #endif // _SNET_H_
