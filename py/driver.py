@@ -2,7 +2,8 @@ import networkx as nx
 import numpy as np
 import random as ra
 import os
-import subprocess as sp
+from collections import defaultdict
+from functools import partial
 from math import ceil,floor
 
 def generateSubGraphs(numgraphs = 2, nodespersub = 5, interconnects = 0):
@@ -47,27 +48,34 @@ def generateHourGlassGraph(nodes=10, interconnects = 0):
     return x
 
 
-def generateData(graph, numPoints=50, noise=0.5):
+def generateData(graph, numPoints=50, noise=0.5, cpds=None):
     """ 
     Generate <numPoints> random draws from graph, with 
     randomly assigned CPDs and additive zero mean Gaussian 
     noise with std_dev=noise on the observations.
+
+    TODO: add noise
     """
+    
     order = nx.topological_sort(graph)
-    adj = np.array(nx.to_numpy_matrix(graph),dtype=np.int)
     numnodes = graph.number_of_nodes()
-    numparents = adj.sum(axis=0)
-    #states = np.ones((numnodes,)) * 2 # assuming 2 states per node
-    states = np.random.randint(2,10, size=numnodes)
-    numparentstates = (states ** numparents)
-    cpds = [np.cumsum(np.random.dirichlet([1./s]*int(s), size=int(p)), axis=1) \
-            for s,p in zip(states.tolist(),numparentstates.tolist())]
+    adj = np.array(nx.to_numpy_matrix(graph),dtype=np.int)
+
+    if not cpds:
+        numparents = adj.sum(axis=0)
+        #states = np.ones((numnodes,)) * 2 # assuming 2 states per node
+        states = np.random.randint(2,10, size=numnodes)
+        numparentstates = (states ** numparents)
+        def cpdGen(states, parstates):
+            return np.cumsum(np.random.dirichlet([1./states]*states))
+        cpds = [defaultdict(partial(cpdGen,s,p)) \
+                for s,p in zip(states,numparentstates)]
     
     draws = np.empty((numPoints, numnodes), dtype=np.int)
     for i in range(numPoints):
         for node in order:
             parents = adj[:,node]
-            parstate = (draws[i,parents==1] * 2**np.arange(numparents[node])).sum()
+            parstate = tuple(draws[i,parents==1])
             draws[i,node] = np.searchsorted(cpds[node][parstate], np.random.random())
 
     return draws, cpds
