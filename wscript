@@ -55,7 +55,7 @@ def build(bld):
                 #linkflags=LDFLAGS,
                 #use=libs)
 
-    bld.shlib(source=bld.path.ant_glob('src/*.c'), 
+    bld.shlib(source = bld.path.ant_glob('src/*.c'), 
                 target='samc', 
                 cflags=CFLAGS,
                 linkflags=LDFLAGS,

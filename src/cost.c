@@ -1,26 +1,28 @@
 #include <Judy.h>
 #include <math.h>
 
-#include "snet.h"
 #include "lib.h"
 
-double cost(simParams *params,
-            simResults *results,
-            int *x, 
-            int **mat, 
-            double *fvalue, 
-            int *changelist, 
-            int changelength)
+double cost(int node_num,
+        int data_num,
+        int limparent,
+        int *state,
+        int **datax,
+        double prior_alpha,
+        double prior_gamma,
+        int *x, 
+        int **mat, 
+        double *fvalue, 
+        int *changelist, 
+        int changelength)
 {
   int count, count00, num, num00, i, j, k, m, s, tep;
-  int numparent, parstate, parlist[params->node_num];
+  int numparent, parstate, parlist[node_num];
   double sum;
   double accum = 0.0;
   double alphaijk = 0.0;
   double alphaik = 0.0;
 
-  /*printf("cl: %d ", changelength);*/
-  results->calcs += changelength;
   for(m=0; m<changelength; m++){
     
     i = changelist[m]; 
@@ -30,7 +32,7 @@ double cost(simParams *params,
 
     for(j=0; j<i-1; j++){
         if(mat[j][i]==1){ 
-           parstate*=params->state[x[j]]; //accumulating the total number of parent sattes
+           parstate*=state[x[j]]; //accumulating the total number of parent sattes
            s++;
            parlist[s]=x[j]; //parent list
          }
@@ -39,11 +41,11 @@ double cost(simParams *params,
     numparent = s; // tot num of parents
 
     // Structure Prior, in log form:
-    fvalue[i] = numparent*log(params->prior_gamma);
+    fvalue[i] = numparent*log(prior_gamma);
 
     // Number of parents limited to limparent
-    if(numparent>params->limparent){ 
-       for(j=0; j<params->node_num; j++) fvalue[j]=1.0e+100;
+    if(numparent>limparent){ 
+       for(j=0; j<node_num; j++) fvalue[j]=1.0e+100;
        goto ABC;
       }
     
@@ -59,7 +61,7 @@ double cost(simParams *params,
 
     /* data summary: count N_{ijk} */
     count=count00=0;
-    for(k=0; k<params->data_num; k++){ 
+    for(k=0; k<data_num; k++){ 
        
         for(num00=0,s=numparent; s>=1; s--){
             tep=1;
@@ -68,9 +70,9 @@ double cost(simParams *params,
             //decimal encoding than because of the 10 states
             //in the breast cancer data.
             //FIXME Shouldn't this be state[x[i]] instead of 10?
-            num00+=params->datax[k][parlist[s]]*tep; 
+            num00+=datax[k][parlist[s]]*tep; 
            }
-        num=num00*10+params->datax[k][x[i]]; 
+        num=num00*10+datax[k][x[i]]; 
         // ^^ Encode the current data row's state and parent values as a
         // numparents+1 digit decimal number. For data sets with too many
         // nodes >32 or >64, we should worry about overflow.
@@ -93,7 +95,7 @@ double cost(simParams *params,
 #ifdef DEBUG
      if(numparent==1) { 
        printf("count: %d, count00: %d, parstate*state: %d\n",
-           count,count00,(parstate+1)*params->state[x[i]]);
+           count,count00,(parstate+1)*state[x[i]]);
        printf("numparent=%d parstate=%d\n", numparent, parstate);
 
      index = 0;
@@ -118,8 +120,8 @@ double cost(simParams *params,
     JLC(count, Parray, 0,-1);
     JLC(count00, Parray00, 0,-1);
      
-    alphaijk=params->prior_alpha/parstate/params->state[x[i]];
-    alphaik=params->prior_alpha/parstate;
+    alphaijk=prior_alpha/parstate/state[x[i]];
+    alphaik=prior_alpha/parstate;
 
     accum = 0.0;
     accum-=count*gammln(alphaijk);
@@ -149,7 +151,7 @@ double cost(simParams *params,
 
   }
 ABC:
-  for(sum=0.0,m=0; m<params->node_num; m++){
+  for(sum=0.0,m=0; m<node_num; m++){
       sum+=fvalue[m];
      }
 

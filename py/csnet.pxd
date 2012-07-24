@@ -15,36 +15,14 @@ cdef extern from "snet.h":
       double rho,tau,temperature
       int *state, **datax
       double *refden
-
-    ctypedef struct simResults:
-      int sze, *bestx, **bestmat, *indicator, nonempty, calcs
-      double *bestfvalue, bestenergy
-      double accept_loc,total_loc
-
-    void copyParamData(simParams* params, double *refden, int *states, char *data)
-    simResults* pyInitSimResults(simParams*)
-
-    int freeSimParams(simParams *params)
-    void freeSimResults(simParams*, simResults* results)
-
-    #int run(simParams* params, simResults* results)
-    #simParams* initSimParams(int rows, int cols, int *states, int **data)
-    #simParams* pyInitSimParams(int rows, int cols, double *refden, int *states, char *data)
-
-
-cdef extern from "metmove.h":
-    int metmove(simParams *params, 
-                simResults *results, 
-                int *x,
-                int **mat,
-                double *fvalue,
-                double **hist,
-                double delta,
-                int *region)
-
 cdef extern from "cost.h":
-    double cost(simParams *params,
-                simResults *results,
+    double cost(int node_num,
+                int data_num,
+                int limparent,
+                int *state,
+                int **datax,
+                double prior_alpha,
+                double prior_gamma,
                 int *x, 
                 int **mat, 
                 double *fvalue, 
