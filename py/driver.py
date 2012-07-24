@@ -90,6 +90,6 @@ def visualizeGraph(graph):
     os.popen('dot -Tsvg -o /tmp/test.svg /tmp/test.dot')
     os.popen('xdg-open /tmp/test.svg')
 
-x = generateHourGlassGraph(40, 5)
-#visualizeGraph(x)
+x = generateHourGlassGraph(10, 2)
+visualizeGraph(x)
 y = generateData(x)

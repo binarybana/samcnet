@@ -13,6 +13,9 @@ import sys
 import numpy as np
 cimport numpy as np
 
+cdef class SAMCRun:
+  pass
+  #def __cinit__(self, 
 cdef class BayesGraph:
   def __init__(self, nodes, states, data):
     """
@@ -98,7 +101,7 @@ def test():
 
     params.total_iteration=50000
     params.burnin=1
-    params.stepscale=25000 # t_0 in the papers
+    params.stepscale=2000 # t_0 in the papers
 
     csnet.copyParamData(params, <double*>refden.data, <int*>states.data, traindata.data)
     cdef simResults *results = <simResults*> csnet.pyInitSimResults(params)
@@ -140,10 +143,12 @@ def test():
     try:
       for iteration in range(params.total_iteration):
         delta = float(params.stepscale) / max(params.stepscale, iteration)
-        csnet.metmove(params, results, <int*>x.data, cmat, <double*>fvalue.data, chist, delta, &region)
+        #csnet.metmove(params, results, <int*>x.data, cmat, <double*>fvalue.data, chist, delta, &region)
+        csnet.metmove(params, results, x, mat, fvalue, hist, delta, &region)
 
         if fvalue.sum() < results.bestenergy:
           results.bestenergy = fvalue.sum()
+          print("Best energy result: %f" % fvalue.sum())
           #Here's we would also save bestx and bestmat if we cared
 
         if iteration == params.burnin:
@@ -151,15 +156,14 @@ def test():
           while i<=params.grid and results.indicator[i] == 0:
             i+=1
           results.nonempty = i
-
         elif iteration > params.burnin:
           pass
-          un = hist[results.nonempty,1]
-          for i in range(params.grid):
-            if results.indicator[i] == 1:
-              hist[i,1] -= float(un)
-          sinw = exp(hist[region,1])
-          totalweight += sinw
+          #un = hist[results.nonempty,1]
+          #for i in range(params.grid):
+            #if results.indicator[i] == 1:
+              #hist[i,1] -= float(un)
+          #sinw = exp(hist[region,1])
+          #totalweight += sinw
         if iteration%10000 == 0:
           print("Iteration: %8d, delta: %g, bestenergy: %g, weight: %g, totalweight: %g\n" % \
               (iteration, delta, results.bestenergy, sinw, totalweight))
@@ -186,31 +190,6 @@ def test():
 
     csnet.freeSimResults(params, results)
     csnet.freeSimParams(params)
-
-
-#cdef convert( numpy.ndarray[numpy.int32_t, ndim = 2] incomingMatrix ):
-    ## Get the size of the matrix.
-    #cdef unsigned int rows = <unsigned int>incomingMatrix.shape[0]
-    #cdef unsigned int cols = <unsigned int>incomingMatrix.shape[1]
-
-    ## Define a C-level variable to act as a 'matrix', and allocate some memory
-    ## for it.
-    #cdef float **data
-    #data = <float **>malloc(rows*sizeof(int *))
-
-    ## Go through the rows and pull out each one as an array of ints which can
-    ## be stored in our C-level 'matrix'.
-    #cdef unsigned int i
-    #for i in range(rows):
-        #data[i] = &(<int *>incomingMatrix.data)[i * cols]
-
-    ## Call the C function to calculate the result.
-    ##cdef float result
-    ##result= cSumMatrix(rows, cols, data)
-
-    ## Free the memory we allocated for the C-level 'matrix', and we are done.
-    ##free(data)
-    #return data
 
 cdef double **npy2c_double(np.ndarray a):
      cdef int m = a.shape[0]
@@ -258,3 +237,141 @@ cdef np.ndarray c2npy_int(int **a, int n, int m):
      free(a)
      return result
 
+        #csnet.metmove(params, results, x, mat, fvalue, hist, delta, &region)
+cdef metmove (simParams *params, 
+              simResults *results, 
+              int x,
+              int **mat,
+              double *fvalue,
+              double **hist,
+              double delta,
+              int *region):
+#cdef metmove (simParams *params, 
+              #simResults *results, 
+              #int *x,
+              #int **mat,
+              #double *fvalue,
+              #double **hist,
+              #double delta,
+              #int *region):
+
+  cdef int k1, k2
+  cdef double fnew
+
+  cdef double fold = fvalue.sum()
+  cdef double *newfvalue = fvalue[:]
+   newfvalue=dvector(0,params->node_num-1);
+  cdef int *newx = x[:]
+   newx=ivector(0,params->node_num-1);
+  cdef int **newmat = mat[:]
+   newmat=imatrix(0,params->node_num-1,0,params->node_num-1);
+
+  cdef int *changelist = <int *> malloc(params.node_num*sizeof(int *))	
+   changelist=ivector(0,params->node_num-1);
+
+
+  if fold > params.maxEE:
+    k1 = results.sze
+  elif fold < params.lowE:
+    k1 = 0
+  else:
+    k1 = floor((fold-params.lowE)*params.scale)
+
+  scheme = np.random.randint(4)   
+
+  if scheme==1: # temporal order change 
+    k = np.random.randint(params.node_num)
+    newx[k], newx[k+1] = x[k+1], x[k]
+    changelist[0], changelist[1] = k, k+1
+    changelength = 2
+
+    for j in range(k+2, params.node_num):
+      if newmat[k][j]==1 or newmat[k+1][j]==1:
+        changelength += 1
+        changelist[changelength-1] = j
+      
+    fnew = csnet.cost(params,results,newx,newmat,newfvalue,changelist,changelength);
+
+  if scheme==2: # skeletal change
+
+    i = np.random.randint(params.node_num)
+    candidates = np.arange(params.node_num).remove(i)
+    np.random.shuffle(candidates)
+    j = candidates[0]
+    if i<j:
+      newmat[i][j] = 1-newmat[i][j]
+      changelength=1
+      changelist[0]=j
+     
+    else:
+      newmat[j][i]=1-newmat[j][i]
+      changelength=1
+      changelist[0]=i
+
+    fnew = csnet.cost(params,results,newx,newmat,newfvalue,changelist,changelength);
+   
+    if scheme==3: # Double skeletal change 
+      candidates = np.arange(params.node_num)
+      np.random.shuffle(candidates)
+      i1, j1 = np.sort(candidates[:2])
+      i2, j2 = np.sort(candidates[-2:])
+
+      newmat[i1][j1]=1-newmat[i1][j1]
+      newmat[i2][j2]=1-newmat[i2][j2]
+
+      #not truthful to original algorithm, here j1 can never == j2
+      changelength=2
+      changelist[0]=j1
+      changelist[1]=j2
+    
+      fnew = csnet.cost(params,results,newx,newmat,newfvalue,changelist,changelength);
+ 
+    
+    # acceptance of new moves 
+
+    if fnew > params.maxEE + params.range:
+      k2 = results.sze-1
+    elif fnew<params.lowE:
+      k2 = 0
+    else:
+      k2 = floor((fnew-params.lowE)*params.scale)
+
+    results.indicator[k2]=1
+
+    r = hist[k1,1]-hist[k2,1]+(fold-fnew)/params.temperature
+
+    if r > 0.0 or np.random.rand() < exp(r):
+      accept=1
+    else:
+      accept=0;
+
+    if accept==1:
+      k1=k2
+      fold=fnew # Codesmell FIXME: fold not used after this point
+      x = newx
+      fvalue = newfvalue
+      mat = newmat
+      hist[k2][2] += 1.0
+      results.accept_loc+=1.0
+      results.total_loc+=1.0
+    else:
+      hist[k1][2] += 1.0
+
+      results.total_loc+=1.0
+
+    if accept == 1 and fnew < results.bestenergy:
+       results.bestenergy = fnew
+       for i in range(params.node_num):
+         results.bestx = x
+         results.bestfvalue = fvalue
+         results.bestmat = mat
+       
+    region[0]=k1
+
+
+    for i in range(results.sze):
+      if results.indicator[i] == 1:
+        hist[i][1]+=delta*(hist[i][2]-params.refden[i])
+
+    free(changelist)
+         

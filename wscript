@@ -19,6 +19,7 @@ def configure(conf):
     conf.check_python_headers()
     conf.check(compiler='cc', lib='Judy', uselib_store='JUDY')
     conf.check(compiler='cc', lib='m', uselib_store='MATH')
+    conf.check(compiler='cc', lib='profiler', uselib_store='PROFILER')
     #conf.env.debug = conf.options.debug
     #conf.check_cc(header_name="Judy.h")
     #conf.check_cc(header_name="math.h")
@@ -28,24 +29,26 @@ def build(bld):
     #bld.shlib(source=bld.path.ant_glob('./src/*.c'), target='samc')
     #if(bld.env.debug):
 
+    libs = 'JUDY MATH'.split()
+
     CFLAGS = ['-Wall','-std=c99']
     LDFLAGS = []
     CYTHONFLAGS = []
     if bld.options.debug:
         print('Beginning debug build')
-        CFLAGS += ['-g','-DDEBUG']
+        CFLAGS += ['-g']#,'-DDEBUG']
         CYTHONFLAGS += ['--gdb']
         LDFLAGS += ['-g']
     if bld.options.prof:
         print('Adding profiling flag build')
         CFLAGS += ['-pg']
         LDFLAGS += ['-pg']
+        libs += ['PROFILER']
     if not bld.options.prof and not bld.options.debug: 
         CFLAGS += ['-O2']
 
     bld.env.CYTHONFLAGS = CYTHONFLAGS
 
-    libs = 'JUDY MATH'.split()
     #bld.program(source=bld.path.ant_glob('src/*.c'), 
                 #target='samcapp', 
                 #cflags=CFLAGS,
