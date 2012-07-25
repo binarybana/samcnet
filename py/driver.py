@@ -90,6 +90,10 @@ def visualizeGraph(graph):
     os.popen('dot -Tsvg -o /tmp/test.svg /tmp/test.dot')
     os.popen('xdg-open /tmp/test.svg')
 
-x = generateHourGlassGraph(10, 2)
-visualizeGraph(x)
-y = generateData(x)
+#x = generateHourGlassGraph(10, 2)
+#visualizeGraph(x)
+#y = generateData(x)
+
+from snet import *
+b,s=test()
+s.sample(10000)

@@ -67,10 +67,12 @@ class SAMCRun:
     self.stepscale = 100000
 
   def find_region(self, energy):
-    region = np.searchsorted(self.hist[:,0],energy)
-    if region == self.hist.shape[0]:
-      return region-1
-    return region
+    if energy > self.highEnergy: 
+      return self.grid-1
+    elif energy < self.lowEnergy:
+      return 0
+    else: 
+      return floor((energy-self.lowEnergy)*self.scale)
 
   def sample(self, iters, thin=1):
     cdef int current_iter, accept, oldregion, newregion
@@ -256,24 +258,24 @@ cdef class BayesNet:#(CBayesNet):
 
   def reject(self):
     """ Revert graph, mat, x, fvalue, changelist, and changelength. """
-    assert self.oldgraph != None
-    self.graph = self.oldgraph
+    #assert self.oldgraph != None
+    #self.graph = self.oldgraph
     self.mat = self.oldmat
     self.x = self.oldx
     self.fvalue = self.oldfvalue
-    self.changelength = self.oldchangelength
-    self.changelist = self.oldchangelist
+    #self.changelength = self.oldchangelength
+    #self.changelist = self.oldchangelist
 
   def propose(self):
     """ 'Propose' a new network structure by backing up the old one and then 
     changing the current one. """
 
-    self.oldgraph = self.graph.copy()
+    #self.oldgraph = self.graph.copy()
     self.oldmat = self.mat.copy()
     self.oldx = self.x.copy()
     self.oldfvalue = self.fvalue.copy()
-    self.oldchangelength = self.changelength
-    self.oldchangelist = self.changelist.copy()
+    #self.oldchangelength = self.changelength
+    #self.oldchangelist = self.changelist.copy()
 
     scheme = np.random.randint(1,4)   
     self.lastscheme = scheme
