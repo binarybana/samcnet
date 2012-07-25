@@ -45,7 +45,8 @@ class SAMCRun:
     self.highEnergy = 25000
     self.scale = 1
     self.grid = ceil((self.highEnergy - self.lowEnergy) * self.scale)
-    self.refden = np.ones((self.grid),dtype=np.double)
+    self.refden = np.arange(self.grid, 0, -1, dtype=np.double)
+    self.refden = self.refden**2
     self.refden /= self.refden.sum()
     self.hist = np.zeros((self.grid,3), dtype=np.double)
 
@@ -61,9 +62,9 @@ class SAMCRun:
     self.mapenergy = np.inf
     self.mapvalue = None
     self.iteration = 0
-    self.delta = 0.0
-    self.burn = 1000
-    self.stepscale = 2000
+    self.delta = 1.0
+    self.burn = 0
+    self.stepscale = 100000
 
   def find_region(self, energy):
     region = np.searchsorted(self.hist[:,0],energy)
@@ -72,20 +73,19 @@ class SAMCRun:
     return region
 
   def sample(self, iters, thin=1):
-
-    self.mapenergy = self.obj.energy()
-    self.mapvalue = self.obj.copy()
-    oldenergy = self.mapenergy
+    cdef int current_iter, accept, oldregion, newregion
+    cdef double oldenergy, newenergy, r
+    oldenergy = self.obj.energy()
     oldregion = self.find_region(oldenergy) # AKA nonempty
     self.indicator[oldregion] = 1
 
-    print("Initial Energy: %f" % self.mapenergy)
+    print("Initial Energy: %f" % oldenergy)
 
     try:
       for current_iter in range(self.iteration, self.iteration + iters):
         self.iteration += 1
 
-        delta = float(self.stepscale) / max(self.stepscale, self.iteration)
+        self.delta = float(self.stepscale) / max(self.stepscale, self.iteration)
 
         self.obj.propose()
         newenergy = self.obj.energy()
@@ -99,6 +99,9 @@ class SAMCRun:
         r = self.hist[oldregion,1] - self.hist[newregion,1] + (oldenergy-newenergy) #/self.temperature
         # I'm not sure how this follows from the paper (p. 868)
 
+        
+        #print("r:%f\t oldregion:%d\t hist[old]:%f\t hist[new]:%f fold:%f, fnew:%f" %
+            #(r,oldregion, self.hist[oldregion,1], self.hist[newregion,1], oldenergy, newenergy))
         if r > 0.0 or np.random.rand() < exp(r):
           accept=1
         else:
@@ -113,36 +116,39 @@ class SAMCRun:
           self.accept_loc += 1
           self.total_loc += 1
           oldregion = newregion
+          oldenergy = newenergy
+
 
         if newenergy < self.mapenergy: # NB: Even if not accepted
           # Update self.mapenergy and self.mapvalue
           self.mapenergy = newenergy
           self.mapvalue = self.obj.copy()
-          print("Best energy result: %f" % newenergy)
+          #print("Best energy result: %f" % newenergy)
            
         locfreq = np.zeros((self.grid),dtype=np.double)
+        #print oldregion
         locfreq[oldregion] += 1
 
         self.hist[:,1] += self.delta*(locfreq-self.refden)
-     
 
         # VV I can't see what purpose this would serve from the paper (except
         # maybe the varying truncation?)
-        #if current_iter == self.burn:
+        #if self.iteration == self.burn:
           #i = 0
           #while i<=self.grid and results.indicator[i] == 0:
             #i+=1
           #results.nonempty = i
-        #elif iteration > self.burnin:
+        #elif self.iteration > self.burnin:
           #pass
           #un = hist[results.nonempty,1]
           #for i in range(self.grid):
             #if results.indicator[i] == 1:
               #hist[i,1] -= float(un)
               
-        if current_iter % 10000 == 0:
-          print("Iteration: %8d, delta: %5.2g, bestenergy: %7.2g, currentenergy: %7.2g" % \
-              (current_iter, self.delta, self.mapenergy, newenergy))
+        if self.iteration % 10000 == 0:
+          print("Iteration: %8d, delta: %5.2f, bestenergy: %7.2f, currentenergy: %7.2f" % \
+              (self.iteration, self.delta, self.mapenergy, newenergy))
+
 
     except KeyboardInterrupt: 
       pass
@@ -168,7 +174,7 @@ cdef class BayesNet:#(CBayesNet):
   cdef public:
     object nodes,states,data,graph,x,mat,fvalue,changelist
     object oldgraph, oldmat, oldx, oldfvalue, oldchangelist
-    int limparent, data_num, node_num, changelength, oldchangelength
+    int limparent, data_num, node_num, changelength, oldchangelength, lastscheme
     double prior_alpha, prior_gamma
   cdef:
     int **cmat, **cdata
@@ -181,8 +187,8 @@ cdef class BayesNet:#(CBayesNet):
     Initializes the BayesNet as a set of independent nodes
     """
     self.nodes = nodes
-    self.states = states
-    self.data = data
+    self.states = np.asarray(states)
+    self.data = np.asarray(data)
 
     self.graph = nx.DiGraph()
     self.graph.add_nodes_from(nodes)
@@ -209,6 +215,7 @@ cdef class BayesNet:#(CBayesNet):
 
     self.oldgraph = None
     self.oldmat = None
+    self.lastscheme = -1
 
   def from_adjacency(self, mat):
     self.graph.clear()
@@ -220,7 +227,7 @@ cdef class BayesNet:#(CBayesNet):
 
   def copy(self):
     """ Not sure what I should actually do here... or if this is really needed """
-    return self.graph # FIXME
+    return (self.mat.copy(), self.x.copy()) # FIXME
 
   def energy(self):
     """ Calculate the -log probability. """
@@ -232,6 +239,7 @@ cdef class BayesNet:#(CBayesNet):
         self.fvalue
     cdef np.ndarray[np.int32_t, ndim=1, mode="c"] changelist = \
         self.changelist
+    self.cmat = npy2c_int(self.mat)
     energy = csnet.cost(self.node_num,
                 self.data_num,
                 self.limparent,
@@ -267,10 +275,11 @@ cdef class BayesNet:#(CBayesNet):
     self.oldchangelength = self.changelength
     self.oldchangelist = self.changelist.copy()
 
-    scheme = np.random.randint(4)   
+    scheme = np.random.randint(1,4)   
+    self.lastscheme = scheme
 
     if scheme==1: # temporal order change 
-      k = np.random.randint(self.node_num)
+      k = np.random.randint(self.node_num-1)
       self.x[k], self.x[k+1] = self.x[k+1], self.x[k]
       self.changelist[0], self.changelist[1] = k, k+1
       self.changelength = 2
@@ -312,15 +321,17 @@ cdef class BayesNet:#(CBayesNet):
 
 def test():
     traindata = np.loadtxt('../data/WBCD2.dat', dtype=np.int32)
-        #cdef int rows = traindata.shape[0]
-    #cdef int cols = traindata.shape[1]
-    #cdef np.ndarray[np.int32_t, ndim=1, mode="c"] states = \
-            #np.ones((cols,), dtype=np.int32)
+    cols = traindata.shape[1]
+    states = np.ones((cols,), dtype=np.int32)
+    nodes = np.arange(cols)
 
-    #traindata[:,-1] -= 1
+    traindata[:,-1] -= 1
 
-    #states[:-1] = 10
-    #states[-1] = 2
+    states[:-1] = 10
+    states[-1] = 2
+    b = BayesNet(nodes,states,traindata)
+
+    return b, SAMCRun(b,'db')
 
 cdef double **npy2c_double(np.ndarray a):
      cdef int m = a.shape[0]
