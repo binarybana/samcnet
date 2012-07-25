@@ -270,6 +270,7 @@ cdef class BayesNet:#(CBayesNet):
     """ 'Propose' a new network structure by backing up the old one and then 
     changing the current one. """
 
+    cdef int i,j,i1,j1,i2,j2
     #self.oldgraph = self.graph.copy()
     self.oldmat = self.mat.copy()
     self.oldx = self.x.copy()
@@ -294,24 +295,30 @@ cdef class BayesNet:#(CBayesNet):
     if scheme==2: # skeletal change
 
       i = np.random.randint(self.node_num)
-      candidates = np.delete(np.arange(self.node_num),i)
-      np.random.shuffle(candidates)
-      j = candidates[0]
+      j = np.random.randint(self.node_num)
+      while i==j:
+        j = np.random.randint(self.node_num)
       if i<j:
         self.mat[i,j] = 1-self.mat[i,j]
         self.changelength=1
         self.changelist[0]=j
-       
       else:
         self.mat[j,i]=1-self.mat[j,i]
         self.changelength=1
         self.changelist[0]=i
 
     if scheme==3: # Double skeletal change 
-      candidates = np.arange(self.node_num)
-      np.random.shuffle(candidates)
-      i1, j1 = np.sort(candidates[:2])
-      i2, j2 = np.sort(candidates[-2:])
+      cand = np.arange(self.node_num)
+      np.random.shuffle(cand)
+      if cand[0] < cand[1]:
+        i1, j1 = cand[0], cand[1] #np.min(cand[:2]), np.max(cand[:2])
+      else:
+        i1, j1 = cand[1], cand[0] 
+
+      if cand[-2] < cand[-1]:
+        i2, j2 = cand[-2], cand[-1] #np.min(cand[-2:]), np.max(cand[-2:])
+      else:
+        i2, j2 = cand[-1], cand[-2] 
 
       self.mat[i1,j1]=1-self.mat[i1,j1]
       self.mat[i2,j2]=1-self.mat[i2,j2]
