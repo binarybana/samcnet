@@ -1,13 +1,15 @@
 # cython: profile=True
 cimport csnet
+cimport cython
 from libc.stdlib cimport malloc, free
 from libc.string cimport memcpy
 from libc.math cimport exp
 from math import ceil, floor
-
+import tables as tb
 
 import networkx as nx
 import sys
+import os
 
 import numpy as np
 cimport numpy as np
@@ -36,23 +38,32 @@ cimport numpy as np
     #self.test()
     #print "hello2"
 
-class SAMCRun:
-  def __init__(self, obj, db):
+cdef class SAMCRun:
+  cdef public:
+    object obj, db, refden, hist, indicator, mapvalue
+    int lowEnergy, highEnergy, scale, grid, accept_loc, total_loc, iteration, burn, stepscale
+    double rho, tau, mapenergy, delta,
+  def __init__(self, obj, db='memory'):
+
     self.obj = obj # Going to be a BayesNet for now, but we'll keep it general
-    self.db = db # Place to store the samples
+
+    if db == 'memory':
+      self.db = [] # Place to store the samples
+    else: 
+      self.db = tb.openFile(db, mode='a', title='SAMCRun', filters = tb.Filters(complevel=4, complib='blosc'))
+      self.obj.init_db(self.db)
 
     self.lowEnergy = 8000
-    self.highEnergy = 25000
+    self.highEnergy = 12000
     self.scale = 1
     self.grid = ceil((self.highEnergy - self.lowEnergy) * self.scale)
     self.refden = np.arange(self.grid, 0, -1, dtype=np.double)
     self.refden = self.refden**2
     self.refden /= self.refden.sum()
-    self.hist = np.zeros((self.grid,3), dtype=np.double)
+    self.hist = np.zeros((3,self.grid), dtype=np.double)
 
-    self.hist[:,0] = np.arange(self.lowEnergy, self.highEnergy, 1./self.scale)
-    self.sze = self.grid - 1 #floor((self.maxEE + self.range - self.lowE) * self.scale)
-    self.indicator = np.zeros((self.grid),dtype=np.int) # Indicator is whether we have visited a region yet
+    self.hist[0,:] = np.arange(self.lowEnergy, self.highEnergy, 1./self.scale)
+    self.indicator = np.zeros((self.grid),dtype=np.int32) # Indicator is whether we have visited a region yet
 
     self.rho=1.0
     self.tau=1.0;
@@ -66,7 +77,7 @@ class SAMCRun:
     self.burn = 0
     self.stepscale = 100000
 
-  def find_region(self, energy):
+  cdef find_region(self, energy):
     if energy > self.highEnergy: 
       return self.grid-1
     elif energy < self.lowEnergy:
@@ -74,9 +85,18 @@ class SAMCRun:
     else: 
       return floor((energy-self.lowEnergy)*self.scale)
 
+  @cython.boundscheck(False) # turn of bounds-checking for entire function
   def sample(self, iters, thin=1):
-    cdef int current_iter, accept, oldregion, newregion
+    cdef int current_iter, accept, oldregion, newregion, i
     cdef double oldenergy, newenergy, r
+    cdef np.ndarray[np.int32_t, ndim=1, mode="c"] indicator = \
+        self.indicator
+    cdef np.ndarray[np.int32_t, ndim=1, mode="c"] locfreq = \
+        np.zeros((self.grid,), dtype=np.int32)
+    cdef np.ndarray[np.double_t, ndim=1, mode="c"] hist = \
+        self.hist[1].copy()
+    cdef np.ndarray[np.double_t, ndim=1, mode="c"] refden = \
+        self.refden
     oldenergy = self.obj.energy()
     oldregion = self.find_region(oldenergy) # AKA nonempty
     self.indicator[oldregion] = 1
@@ -98,40 +118,37 @@ class SAMCRun:
 
         self.indicator[newregion] = 1
 
-        r = self.hist[oldregion,1] - self.hist[newregion,1] + (oldenergy-newenergy) #/self.temperature
+        r = hist[oldregion] - hist[newregion] + (oldenergy-newenergy) #/self.temperature
         # I'm not sure how this follows from the paper (p. 868)
 
         
         #print("r:%f\t oldregion:%d\t hist[old]:%f\t hist[new]:%f fold:%f, fnew:%f" %
-            #(r,oldregion, self.hist[oldregion,1], self.hist[newregion,1], oldenergy, newenergy))
+            #(r,oldregion, hist[1,oldregion], hist[1,newregion], oldenergy, newenergy))
         if r > 0.0 or np.random.rand() < exp(r):
           accept=1
         else:
           accept=0;
 
         if accept == 0:
-          self.hist[oldregion][2] += 1.0
+          self.hist[2,oldregion] += 1.0
           self.obj.reject()
           self.total_loc += 1
         elif accept == 1:
-          self.hist[newregion][2] += 1.0
+          self.hist[2,newregion] += 1.0
           self.accept_loc += 1
           self.total_loc += 1
           oldregion = newregion
           oldenergy = newenergy
 
-
         if newenergy < self.mapenergy: # NB: Even if not accepted
-          # Update self.mapenergy and self.mapvalue
           self.mapenergy = newenergy
           self.mapvalue = self.obj.copy()
-          #print("Best energy result: %f" % newenergy)
            
-        locfreq = np.zeros((self.grid),dtype=np.double)
-        #print oldregion
         locfreq[oldregion] += 1
+        hist += self.delta*(locfreq-refden)
+        locfreq[oldregion] -= 1
 
-        self.hist[:,1] += self.delta*(locfreq-self.refden)
+        self.obj.save_to_db(self.db, oldenergy, hist[oldregion], oldregion)
 
         # VV I can't see what purpose this would serve from the paper (except
         # maybe the varying truncation?)
@@ -142,18 +159,19 @@ class SAMCRun:
           #results.nonempty = i
         #elif self.iteration > self.burnin:
           #pass
-          #un = hist[results.nonempty,1]
+          #un = hist[1,results.nonempty]
           #for i in range(self.grid):
             #if results.indicator[i] == 1:
-              #hist[i,1] -= float(un)
+              #hist[1,i] -= float(un)
               
         if self.iteration % 10000 == 0:
           print("Iteration: %8d, delta: %5.2f, bestenergy: %7.2f, currentenergy: %7.2f" % \
               (self.iteration, self.delta, self.mapenergy, newenergy))
-
-
     except KeyboardInterrupt: 
       pass
+
+    self.hist[1] = hist
+    self.indicator = indicator
 
           
     ###### Calculate summary statistics #######
@@ -162,20 +180,11 @@ class SAMCRun:
     #print(x)
     print("Accept_loc: %d" % self.accept_loc)
     print("Total_loc: %d" % self.total_loc)
-    #print("Calcs: %d" % results.calcs)
 
-#cdef class CBayesNet:
-  #cdef public:
-    #int **cdata, **cmat
-    #np.ndarray[np.int32_t, ndim=2, mode="c"] mat 
-    #np.ndarray[np.int32_t, ndim=2, mode="c"] data
-    #np.ndarray[np.double_t, ndim=1, mode="c"] fvalue 
-    #np.ndarray[np.int32_t, ndim=1, mode="c"] changelist 
-
-cdef class BayesNet:#(CBayesNet):
+cdef class BayesNet:
   cdef public:
     object nodes,states,data,graph,x,mat,fvalue,changelist
-    object oldgraph, oldmat, oldx, oldfvalue, oldchangelist
+    object oldgraph, oldmat, oldx, oldfvalue, oldchangelist, table
     int limparent, data_num, node_num, changelength, oldchangelength, lastscheme
     double prior_alpha, prior_gamma
   cdef:
@@ -219,10 +228,45 @@ cdef class BayesNet:#(CBayesNet):
     self.oldmat = None
     self.lastscheme = -1
 
-  def from_adjacency(self, mat):
+  def init_db(self, db):
+    if '/samples' in db:
+      self.table = db.getNode('/samples')
+      if len(db.root.samples) > 0:
+        self.mat = db.root.samples[-1]['matrix']
+        self.cmat = npy2c_int(self.mat)
+        self.x = np.arange(self.node_num, dtype=np.int32)
+        self.changelength = self.node_num
+        self.changelist = np.arange(cols, dtype=np.int32)
+    else:
+      dtype = {'matrix': tb.IntCol(shape=(self.node_num, self.node_num)),
+          'energy': tb.Float64Col(),
+          'theta': tb.Float64Col(),
+          'region': tb.IntCol()}
+      self.table = db.createTable('/', 'samples', description=dtype)
+
+  def save_to_db(self, db, energy, theta, region):
+    s = self.x.argsort()
+    if type(db) == list:
+      db.append({'matrix': self.mat[s].T[s].T,
+        'energy': energy,
+        'theta' : theta,
+        'region': region})
+    else:
+      self.table.row['matrix'] = self.mat[s].T[s].T
+      self.table.row['energy'] = energy
+      self.table.row['theta'] = theta
+      self.table.row['region'] = region
+      self.table.row.append()
+      db.flush()
+
+  def from_adjacency(self):
     self.graph.clear()
-    self.graph = nx.from_numpy_matrix(mat)
-    assert len(self.nodes) == self.graph.number_of_nodes()
+    s = self.x.argsort()
+    self.graph = nx.from_numpy_matrix(self.mat[s].T[s].T, create_using=nx.DiGraph())
+    return self.graph
+
+  def to_dot(self):
+    nx.write_dot(self.from_adjacency(), '/tmp/graph.dot')
 
   def to_adjacency(self):
     return nx.to_numpy_matrix(self.graph)
@@ -340,7 +384,7 @@ def test():
     states[-1] = 2
     b = BayesNet(nodes,states,traindata)
 
-    return b, SAMCRun(b,'db')
+    return b, SAMCRun(b,'db.h5')
 
 cdef double **npy2c_double(np.ndarray a):
      cdef int m = a.shape[0]

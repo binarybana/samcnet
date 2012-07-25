@@ -95,5 +95,12 @@ def visualizeGraph(graph):
 #y = generateData(x)
 
 from snet import *
-b,s=test()
-s.sample(10000)
+import pstats, cProfile
+
+cProfile.runctx("b,s=test(); s.sample(10000)", globals(), locals(), "prof.stat")
+
+s = pstats.Stats("prof.stat")
+s.strip_dirs().sort_stats("time").print_stats()
+
+#b,s=test()
+#s.sample(10000)
