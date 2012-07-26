@@ -1,7 +1,7 @@
 # cython: profile=True
 cimport csnet
 cimport cython
-from libc.stdlib cimport malloc, free
+from libc.stdlib cimport malloc, free, rand, RAND_MAX
 from libc.string cimport memcpy
 from libc.math cimport exp
 from math import ceil, floor
@@ -46,12 +46,7 @@ cdef class SAMCRun:
   def __init__(self, obj, db='memory'):
 
     self.obj = obj # Going to be a BayesNet for now, but we'll keep it general
-
-    if db == 'memory':
-      self.db = [] # Place to store the samples
-    else: 
-      self.db = tb.openFile(db, mode='a', title='SAMCRun', filters = tb.Filters(complevel=4, complib='blosc'))
-      self.obj.init_db(self.db)
+    self.init_db(db)
 
     self.lowEnergy = 8000
     self.highEnergy = 12000
@@ -67,15 +62,49 @@ cdef class SAMCRun:
 
     self.rho=1.0
     self.tau=1.0;
-    self.accept_loc = 0
-    self.total_loc = 0
 
-    self.mapenergy = np.inf
-    self.mapvalue = None
-    self.iteration = 0
-    self.delta = 1.0
     self.burn = 0
     self.stepscale = 100000
+
+  def clear(self):
+    fname = self.db.filename
+    self.db.close()
+    os.remove(fname)
+    self.init_db(fname)
+
+  def init_db(self,db):
+    self.mapenergy = np.inf
+    self.mapvalue = None
+    self.delta = 1.0
+    self.iteration = 0
+    self.accept_loc = 0
+    self.total_loc = 0
+    if db == 'memory':
+      self.db = [] # Place to store the samples
+    else: 
+      self.db = tb.openFile(db, mode='a', title='SAMCRun', 
+          filters = tb.Filters(complevel=4, complib='blosc'))
+      if '/samples' in self.db and len(self.db.root.samples) > 0:
+        self.delta = self.db.getNodeAttr('/','delta')
+        self.mapenergy = self.db.getNodeAttr('/','mapenergy')
+        self.mapvalue = self.db.getNodeAttr('/','mapvalue')
+        self.iteration = self.db.getNodeAttr('/','iteration')
+        self.accept_loc = self.db.getNodeAttr('/','accept_loc')
+        self.total_loc = self.db.getNodeAttr('/','total_loc')
+
+      self.obj.init_db(self.db) # Only for pytables dbs
+
+  def save_attribs(self):
+    if type(self.db) != list:
+      self.db.setNodeAttr('/','delta',self.delta)
+      self.db.setNodeAttr('/','mapenergy',self.mapenergy)
+      self.db.setNodeAttr('/','mapvalue',self.mapvalue)
+      self.db.setNodeAttr('/','iteration',self.iteration)
+      self.db.setNodeAttr('/','accept_loc',self.accept_loc)
+      self.db.setNodeAttr('/','total_loc',self.total_loc)
+
+  def __del__(self):
+    self.save_attribs()
 
   cdef find_region(self, energy):
     if energy > self.highEnergy: 
@@ -102,9 +131,10 @@ cdef class SAMCRun:
     self.indicator[oldregion] = 1
 
     print("Initial Energy: %f" % oldenergy)
+    fid = open("rlogpy2",'w')
 
     try:
-      for current_iter in range(self.iteration, self.iteration + iters):
+      for current_iter in range(self.iteration, self.iteration + int(iters)):
         self.iteration += 1
 
         self.delta = float(self.stepscale) / max(self.stepscale, self.iteration)
@@ -119,8 +149,9 @@ cdef class SAMCRun:
         self.indicator[newregion] = 1
 
         r = hist[oldregion] - hist[newregion] + (oldenergy-newenergy) #/self.temperature
-        # I'm not sure how this follows from the paper (p. 868)
-
+        
+        fid.write("%f,%f,%f,%f,%f,%f\n" % (hist[oldregion], hist[newregion], oldenergy,
+          newenergy, r, self.obj.lastscheme))
         
         #print("r:%f\t oldregion:%d\t hist[old]:%f\t hist[new]:%f fold:%f, fnew:%f" %
             #(r,oldregion, hist[1,oldregion], hist[1,newregion], oldenergy, newenergy))
@@ -169,23 +200,23 @@ cdef class SAMCRun:
               (self.iteration, self.delta, self.mapenergy, newenergy))
     except KeyboardInterrupt: 
       pass
-
     self.hist[1] = hist
     self.indicator = indicator
-
-          
     ###### Calculate summary statistics #######
-    
-    #print(mat)
-    #print(x)
     print("Accept_loc: %d" % self.accept_loc)
     print("Total_loc: %d" % self.total_loc)
+    print("Acceptance: %f" % (float(self.accept_loc)/float(self.total_loc)))
+
+    self.save_attribs()
+
+    self.obj.update_graph(self.mapvalue)
+    self.obj.to_dot()
 
 cdef class BayesNet:
   cdef public:
-    object nodes,states,data,graph,x,mat,fvalue,changelist
-    object oldgraph, oldmat, oldx, oldfvalue, oldchangelist, table
-    int limparent, data_num, node_num, changelength, oldchangelength, lastscheme
+    object nodes,states,data,graph,x,mat,fvalue,changelist,table
+    object oldmat, oldx, oldfvalue
+    int limparent, data_num, node_num, changelength, lastscheme
     double prior_alpha, prior_gamma
   cdef:
     int **cmat, **cdata
@@ -224,9 +255,18 @@ cdef class BayesNet:
     self.cmat = npy2c_int(self.mat)
     self.cdata = npy2c_int(self.data)
 
-    self.oldgraph = None
-    self.oldmat = None
     self.lastscheme = -1
+
+  def __del__(self):
+    """ This should not be expected to run (google python's behavior
+    in __del__ to see why). But we really don't need it to. """
+    self.table.flush()
+
+  def __dealloc__(self):
+    """ Should deallocate self.cmat here, but since it is tied to 
+    c.mat, I don't really want to mess with it right now.
+    """
+    pass
 
   def init_db(self, db):
     if '/samples' in db:
@@ -234,46 +274,62 @@ cdef class BayesNet:
       if len(db.root.samples) > 0:
         self.mat = db.root.samples[-1]['matrix']
         self.cmat = npy2c_int(self.mat)
-        self.x = np.arange(self.node_num, dtype=np.int32)
+        self.x = db.root.samples[-1]['x']
         self.changelength = self.node_num
-        self.changelist = np.arange(cols, dtype=np.int32)
+        self.changelist = np.arange(self.node_num, dtype=np.int32)
     else:
       dtype = {'matrix': tb.IntCol(shape=(self.node_num, self.node_num)),
+          'x': tb.IntCol(shape=(self.node_num,)),
           'energy': tb.Float64Col(),
           'theta': tb.Float64Col(),
           'region': tb.IntCol()}
       self.table = db.createTable('/', 'samples', description=dtype)
 
   def save_to_db(self, db, energy, theta, region):
-    s = self.x.argsort()
     if type(db) == list:
-      db.append({'matrix': self.mat[s].T[s].T,
-        'energy': energy,
-        'theta' : theta,
-        'region': region})
+      pass
+      #db.append({'matrix': self.mat,
+        #'x': self.x,
+        #'energy': energy,
+        #'theta' : theta,
+        #'region': region})
     else:
-      self.table.row['matrix'] = self.mat[s].T[s].T
+      self.table.row['matrix'] = self.mat#[s].T[s].T
       self.table.row['energy'] = energy
       self.table.row['theta'] = theta
       self.table.row['region'] = region
+      self.table.row['x'] = self.x
       self.table.row.append()
       db.flush()
 
-  def from_adjacency(self):
+  def update_graph(self, matx=None):
+    if matx:
+      assert len(matx) == 2
+      assert matx[0].shape == (self.node_num,self.node_num)
+      assert matx[1].shape == (self.node_num,)
+      assert matx[0].dtype == np.int32
+      assert matx[1].dtype == np.int32
+      self.mat = matx[0].copy()
+      self.x = matx[1].copy()
+      self.cmat = npy2c_int(self.mat)
+      self.fvalue = np.zeros_like(self.fvalue)
+      self.changelength = self.node_num
+      self.changelist = np.arange(self.node_num, dtype=np.int32)
+
     self.graph.clear()
     s = self.x.argsort()
-    self.graph = nx.from_numpy_matrix(self.mat[s].T[s].T, create_using=nx.DiGraph())
-    return self.graph
+    ordered = self.mat[s].T[s].T
+    self.graph = nx.from_numpy_matrix(ordered - np.eye(self.node_num), create_using=nx.DiGraph())
 
   def to_dot(self):
-    nx.write_dot(self.from_adjacency(), '/tmp/graph.dot')
+    self.update_graph()
+    nx.write_dot(self.graph, '/tmp/graph.dot')
 
   def to_adjacency(self):
     return nx.to_numpy_matrix(self.graph)
 
   def copy(self):
-    """ Not sure what I should actually do here... or if this is really needed """
-    return (self.mat.copy(), self.x.copy()) # FIXME
+    return (self.mat.copy(), self.x.copy())
 
   def energy(self):
     """ Calculate the -log probability. """
@@ -302,25 +358,20 @@ cdef class BayesNet:
 
   def reject(self):
     """ Revert graph, mat, x, fvalue, changelist, and changelength. """
-    #assert self.oldgraph != None
-    #self.graph = self.oldgraph
     self.mat = self.oldmat
     self.x = self.oldx
     self.fvalue = self.oldfvalue
-    #self.changelength = self.oldchangelength
-    #self.changelist = self.oldchangelist
+    # IF I really wanted to be safe I would set changelngeth=10 and changelist
+    # to arange
 
   def propose(self):
     """ 'Propose' a new network structure by backing up the old one and then 
     changing the current one. """
 
     cdef int i,j,i1,j1,i2,j2
-    #self.oldgraph = self.graph.copy()
     self.oldmat = self.mat.copy()
     self.oldx = self.x.copy()
     self.oldfvalue = self.fvalue.copy()
-    #self.oldchangelength = self.changelength
-    #self.oldchangelist = self.changelist.copy()
 
     scheme = np.random.randint(1,4)   
     self.lastscheme = scheme
@@ -352,25 +403,84 @@ cdef class BayesNet:
         self.changelist[0]=i
 
     if scheme==3: # Double skeletal change 
-      cand = np.arange(self.node_num)
-      np.random.shuffle(cand)
-      if cand[0] < cand[1]:
-        i1, j1 = cand[0], cand[1] #np.min(cand[:2]), np.max(cand[:2])
+      i1=i2=0
+      j1=j2=0
+      while(i1==i2 and j1==j2):
+        i1=0
+        while(i1<0 or i1>self.node_num-1):
+          i1=floor(rand()*1.0/RAND_MAX*self.node_num)+1
+        j1=i1
+        while(j1<0 or j1>self.node_num-1 or j1==i1):
+          j1=floor(rand()*1.0/RAND_MAX*self.node_num)+1
+        if(i1>j1):
+          k=i1
+          i1=j1
+          j1=k
+        i2=0
+        while(i2<0 or i2>self.node_num-1):
+          i2=floor(rand()*1.0/RAND_MAX*self.node_num)+1
+        j2=i2
+        while(j2<0 or j2>self.node_num-1 or j2==i2):
+          j2=floor(rand()*1.0/RAND_MAX*self.node_num)+1
+        if(i2>j2):
+          k=i2
+          i2=j2
+          j2=k
+       
+      if(j1==j2):
+        self.changelength=1
+        self.changelist[1]=j1
       else:
-        i1, j1 = cand[1], cand[0] 
+        self.changelength=2
+        self.changelist[1]=j1
+        self.changelist[2]=j2
 
-      if cand[-2] < cand[-1]:
-        i2, j2 = cand[-2], cand[-1] #np.min(cand[-2:]), np.max(cand[-2:])
-      else:
-        i2, j2 = cand[-1], cand[-2] 
+        
+       #i1=i2=0; j1=j2=0;
+       #while(i1==i2 && j1==j2){  
+         #i1=0;
+         #while(i1<1 || i1>node_num)
+             #i1=floor(rand()*1.0/RAND_MAX*node_num)+1;
+         #j1=i1;
+         #while(j1<1 || j1>node_num || j1==i1)
+             #j1=floor(rand()*1.0/RAND_MAX*node_num)+1;
+         #if(i1>j1){ k=i1; i1=j1; j1=k; }
+
+         #i2=0;
+         #while(i2<1 || i2>node_num)
+             #i2=floor(rand()*1.0/RAND_MAX*node_num)+1;
+         #j2=i2;
+         #while(j2<1 || j2>node_num || j2==i2)
+             #j2=floor(rand()*1.0/RAND_MAX*node_num)+1; 
+         #if(i2>j2){ k=i2; i2=j2; j2=k; }
+        #}
+       
+
+        #newmat[i1][j1]=1-newmat[i1][j1];
+        #newmat[i2][j2]=1-newmat[i2][j2];
+
+        #if(j1==j2){ changelength=1; changelist[1]=j1; }
+           #else{ changelength=2; changelist[1]=j1; changelist[2]=j2; }
+
+      #cand = np.arange(self.node_num)
+      #np.random.shuffle(cand)
+      #if cand[0] < cand[1]:
+        #i1, j1 = cand[0], cand[1] #np.min(cand[:2]), np.max(cand[:2])
+      #else:
+        #i1, j1 = cand[1], cand[0] 
+
+      #if cand[-2] < cand[-1]:
+        #i2, j2 = cand[-2], cand[-1] #np.min(cand[-2:]), np.max(cand[-2:])
+      #else:
+        #i2, j2 = cand[-1], cand[-2] 
 
       self.mat[i1,j1]=1-self.mat[i1,j1]
       self.mat[i2,j2]=1-self.mat[i2,j2]
 
       #not truthful to original algorithm, here j1 can never == j2
-      self.changelength=2
-      self.changelist[0]=j1
-      self.changelist[1]=j2
+      #self.changelength=2
+      #self.changelist[0]=j1
+      #self.changelist[1]=j2
 
 def test():
     traindata = np.loadtxt('../data/WBCD2.dat', dtype=np.int32)
@@ -384,7 +494,7 @@ def test():
     states[-1] = 2
     b = BayesNet(nodes,states,traindata)
 
-    return b, SAMCRun(b,'db.h5')
+    return b, SAMCRun(b)#'db.h5')
 
 cdef double **npy2c_double(np.ndarray a):
      cdef int m = a.shape[0]
