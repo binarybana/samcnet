@@ -33,8 +33,8 @@ double cost(int node_num,
     for(j=0; j<i-1; j++){
         if(mat[j][i]==1){ 
            parstate*=state[x[j]]; //accumulating the total number of parent sattes
-           s++;
            parlist[s]=x[j]; //parent list
+           s++;
          }
        }
 
@@ -63,9 +63,10 @@ double cost(int node_num,
     count=count00=0;
     for(k=0; k<data_num; k++){ 
        
-        for(num00=0,s=numparent; s>=1; s--){
+        for(num00=0,s=numparent-1; s>=0; s--){
             tep=1;
-            for(j=1; j<s; j++) tep*=10; 
+            FIXME for(j=0; j<s; j++) tep*=10; 
+            //
             //I'm not so sure...anymore, this may be due to
             //decimal encoding than because of the 10 states
             //in the breast cancer data.

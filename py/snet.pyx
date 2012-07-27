@@ -141,6 +141,10 @@ cdef class SAMCRun:
 
         self.obj.propose()
         newenergy = self.obj.energy()
+
+        if newenergy < self.mapenergy: # NB: Even if not accepted
+          self.mapenergy = newenergy
+          self.mapvalue = self.obj.copy()
     
         ####### acceptance of new moves #########
 
@@ -170,10 +174,6 @@ cdef class SAMCRun:
           self.total_loc += 1
           oldregion = newregion
           oldenergy = newenergy
-
-        if newenergy < self.mapenergy: # NB: Even if not accepted
-          self.mapenergy = newenergy
-          self.mapvalue = self.obj.copy()
            
         locfreq[oldregion] += 1
         hist += self.delta*(locfreq-refden)
@@ -314,7 +314,7 @@ cdef class BayesNet:
       self.cmat = npy2c_int(self.mat)
       self.fvalue = np.zeros_like(self.fvalue)
       self.changelength = self.node_num
-      self.changelist = np.arange(self.node_num, dtype=np.int32)
+      self.changelist = matx[1].copy()#np.arange(self.node_num, dtype=np.int32)
 
     self.graph.clear()
     s = self.x.argsort()
