@@ -1,8 +1,8 @@
 #! /usr/bin/env python
 # encoding: utf-8
-#
-APPNAME = 'libsamc'
-VERSION = '0.1'
+
+APPNAME = 'samcsynthetic'
+VERSION = '0.2'
 
 top = '.'
 out = 'build'
@@ -13,22 +13,13 @@ def options(opt):
     opt.add_option('-p', '--prof', action='store_true', default=False, help='Profiling flag.')
 
 def configure(conf):
-    #conf.env.CFLAGS = "-O2 -fPIC -shared".split()
-    #conf.env.CFLAGS = "-O2 -fPIC -shared".split()
     conf.load('compiler_c python cython')
     conf.check_python_headers()
     conf.check(compiler='cc', lib='Judy', uselib_store='JUDY')
     conf.check(compiler='cc', lib='m', uselib_store='MATH')
     conf.check(compiler='cc', lib='profiler', uselib_store='PROFILER')
-    #conf.env.debug = conf.options.debug
-    #conf.check_cc(header_name="Judy.h")
-    #conf.check_cc(header_name="math.h")
-    #features='cxx', lib=['m','Judy'], cflags='-Wall -O2'.split())
 
 def build(bld):
-    #bld.shlib(source=bld.path.ant_glob('./src/*.c'), target='samc')
-    #if(bld.env.debug):
-
     libs = 'JUDY MATH'.split()
 
     CFLAGS = ['-Wall','-std=c99']
@@ -36,9 +27,9 @@ def build(bld):
     CYTHONFLAGS = []
     if bld.options.debug:
         print('Beginning debug build')
-        CFLAGS += ['-g']#,'-DDEBUG']
+        CFLAGS += ['-g','-DDEBUG']
         CYTHONFLAGS += ['--gdb']
-        LDFLAGS += ['-g']
+        LDFLAGS += ['-g','-DDEBUG']
     if bld.options.prof:
         print('Adding profiling flag build')
         CFLAGS += ['-pg']
@@ -49,24 +40,24 @@ def build(bld):
 
     bld.env.CYTHONFLAGS = CYTHONFLAGS
 
-    #bld.program(source=bld.path.ant_glob('src/*.c'), 
-                #target='samcapp', 
-                #cflags=CFLAGS,
-                #linkflags=LDFLAGS,
-                #use=libs)
-
     bld.shlib(source = bld.path.ant_glob('src/*.c'), 
-                target='samc', 
+                target='cost', 
                 cflags=CFLAGS,
                 linkflags=LDFLAGS,
                 use=libs)
 
     bld(features='c cshlib pyext',
-        source=['py/snet.pyx'],
-        includes=['src'],
-        use='samc',
+        source=['py/samc.pyx'],
+        includes=[],
         libpath=['.','./build'],
-        target='snet')
+        target='samc')
+
+    bld(features='c cshlib pyext',
+        source=['py/bayesnet.pyx'],
+        includes=['src'],
+        use='cost',
+        libpath=['.','./build'],
+        target='bayesnet')
 
 def dist(ctx):
         ctx.excl      = '**/*.zip **/*.bz2 **/.waf-1* **/*~ **/*.pyc **/*.swp **/.lock-w*' 

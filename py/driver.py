@@ -1,106 +1,74 @@
-import networkx as nx
+import sys, shutil
+
+sys.path.append('../build')
+
+from samc import SAMCRun
+from bayesnet import BayesNet
+from generator import generateHourGlassGraph, generateData, sampleTemplate
+from utils import *
+
+import random
+from time import time
+import pygraphviz as pgv
 import numpy as np
-import random as ra
-import os
-from collections import defaultdict
-from functools import partial
-from math import ceil,floor
+import pebl as pb
+#import pstats, cProfile
 
-def generateSubGraphs(numgraphs = 2, nodespersub = 5, interconnects = 0):
-    kernel = lambda x: x**0.0001
-    x = temp = nx.gn_graph(nodespersub, kernel)
+#cProfile.runctx("b,s=test(); s.sample(10000)", globals(), locals(), "prof.stat")
 
-    for i in range(numgraphs-1):
-        temp = nx.gn_graph(nodespersub, kernel)
-        x = nx.disjoint_union(x, temp)
-        #Now add some crosstalk
-        workinglen = len(x) - len(temp)
-        for i in range(interconnects):
-            firstnode = ra.choice(range(workinglen))
-            secondnode = ra.choice(range(workinglen,len(x)))
+#s = pstats.Stats("prof.stat")
+#s.strip_dirs().sort_stats("time").print_stats()
 
-            newedge = [firstnode, secondnode]
-            ra.shuffle(newedge)
-            x.add_edge(newedge[0], newedge[1])
-    return x
+def test():
+    traindata = np.loadtxt('../data/WBCD2.dat', dtype=np.int32)
+    cols = traindata.shape[1]
+    states = np.ones((cols,), dtype=np.int32)
+    nodes = np.arange(cols)
 
-def generateHourGlassGraph(nodes=10, interconnects = 0):
-    def flipGraph(g):
-        e = g.edges()
-        g.remove_edges_from(e)
-        g.add_edges_from(zip(*zip(*e)[::-1]))
+    traindata[:,:-1] -= 1
+    traindata[:,-1] += 1
 
-    kernel = lambda x: x**0.0001
-    n1 , n2 = int(floor(nodes/2.)), int(ceil(nodes/2.))
-    x1 = nx.gn_graph(n1, kernel)
-    x2 = nx.gn_graph(n2, kernel)
-    flipGraph(x2)
-    x = nx.disjoint_union(x1,x2)
-    x.add_edge(0,n1+1)
+    states[:-1] = 10
+    states[-1] = 2
+    b = BayesNet(nodes,states,traindata)
 
-    for i in range(interconnects):
-        firstnode = ra.choice(range(n1))
-        secondnode = ra.choice(range(n1,n1+n2))
-        #newedge = [firstnode, secondnode]
-        #ra.shuffle(newedge)
-        #x.add_edge(newedge[0], newedge[1])
-        x.add_edge(firstnode,secondnode)
-    return x
+    return b, SAMCRun(b)#'db.h5')
+
+np.random.seed(1234)
+random.seed(1234)
+
+N = 15
+graph = generateHourGlassGraph(nodes=N)
+traindata, states, cpds = generateData(graph, 50)
+nodes = np.arange(graph.number_of_nodes())
 
 
-def generateData(graph, numPoints=50, noise=0.5, cpds=None):
-    """ 
-    Generate <numPoints> random draws from graph, with 
-    randomly assigned CPDs and additive zero mean Gaussian 
-    noise with std_dev=noise on the observations.
+b = BayesNet(nodes,states,traindata)
+t1 = time()
+s = SAMCRun(b)
+s.sample(6e4)
+t2 = time()
 
-    TODO: add noise
-    """
-    
-    order = nx.topological_sort(graph)
-    numnodes = graph.number_of_nodes()
-    adj = np.array(nx.to_numpy_matrix(graph),dtype=np.int)
+print("SAMC took %f seconds" % (t2-t1))
 
-    if not cpds:
-        numparents = adj.sum(axis=0)
-        #states = np.ones((numnodes,)) * 2 # assuming 2 states per node
-        states = np.random.randint(2,10, size=numnodes)
-        numparentstates = (states ** numparents)
-        def cpdGen(states, parstates):
-            return np.cumsum(np.random.dirichlet([1./states]*states))
-        cpds = [defaultdict(partial(cpdGen,s,p)) \
-                for s,p in zip(states,numparentstates)]
-    
-    draws = np.empty((numPoints, numnodes), dtype=np.int)
-    for i in range(numPoints):
-        for node in order:
-            parents = adj[:,node]
-            parstate = tuple(draws[i,parents==1])
-            draws[i,node] = np.searchsorted(cpds[node][parstate], np.random.random())
+dataset = to_pebl(states, traindata)
 
-    return draws, cpds
+t1 = time()
+learner = pb.learner.simanneal.SimulatedAnnealingLearner(dataset, 
+        start_temp=10000, delta_temp=0.9)
+#learner = pb.learner.simanneal.SimulatedAnnealingLearner(dataset, 
+        #pb.prior.UniformPrior(N), start_temp=10000, delta_temp=0.9)
+ex1result = learner.run()
+t2 = time()
 
-def sampleTemplate(graph, numEdges=3):
-    edges = graph.edges()
-    ra.shuffle(edges)
-    return edges[:numEdges]
+try:
+    shutil.rmtree('example-result')
+except:
+    pass
+ex1result.tohtml('example-result')
 
-def visualizeGraph(graph):
-    nx.write_dot(x, '/tmp/test.dot')
-    os.popen('dot -Tsvg -o /tmp/test.svg /tmp/test.dot')
-    os.popen('xdg-open /tmp/test.svg')
+print("Simulated Annealing took %f seconds" % (t2-t1))
 
-#x = generateHourGlassGraph(10, 2)
-#visualizeGraph(x)
-#y = generateData(x)
+b.update_graph(s.mapvalue)
+before_and_after(graph, b.graph)
 
-from snet import *
-import pstats, cProfile
-
-cProfile.runctx("b,s=test(); s.sample(10000)", globals(), locals(), "prof.stat")
-
-s = pstats.Stats("prof.stat")
-s.strip_dirs().sort_stats("time").print_stats()
-
-#b,s=test()
-#s.sample(10000)

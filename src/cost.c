@@ -16,7 +16,7 @@ double cost(int node_num,
         int *changelist, 
         int changelength)
 {
-  int count, count00, num, num00, i, j, k, m, s, tep;
+  int num_obs_p_states, num_obs_pn_states, node_state, parent_state, i, j, k, m, s, tep;
   int numparent, parstate, parlist[node_num];
   double sum;
   double accum = 0.0;
@@ -30,9 +30,9 @@ double cost(int node_num,
     parstate = 1; 
     s = 0;
 
-    for(j=0; j<i-1; j++){
+    for(j=0; j<i; j++){
         if(mat[j][i]==1){ 
-           parstate*=state[x[j]]; //accumulating the total number of parent sattes
+           parstate*=state[x[j]]; //accumulating the total number of parent states
            parlist[s]=x[j]; //parent list
            s++;
          }
@@ -54,101 +54,103 @@ double cost(int node_num,
     */
 
     /* parent state table */
-    Pvoid_t  Parray = (Pvoid_t) NULL;		// empty JudyL array.
-    Pvoid_t  Parray00 = (Pvoid_t) NULL;		// empty JudyL array.
+    Pvoid_t  node_p_array = (Pvoid_t) NULL;		// empty JudyL array.
+    Pvoid_t  parent_array = (Pvoid_t) NULL;		// empty JudyL array.
     Word_t * Pvalue;				// value for one index.
     Word_t   index;				// in JudyL array.
 
     /* data summary: count N_{ijk} */
-    count=count00=0;
+    num_obs_p_states=num_obs_pn_states=0;
     for(k=0; k<data_num; k++){ 
        
-        for(num00=0,s=numparent-1; s>=0; s--){
+        for(parent_state=0,s=numparent-1; s>=0; s--){
             tep=1;
-            FIXME for(j=0; j<s; j++) tep*=10; 
-            //
-            //I'm not so sure...anymore, this may be due to
-            //decimal encoding than because of the 10 states
-            //in the breast cancer data.
-            //FIXME Shouldn't this be state[x[i]] instead of 10?
-            num00+=datax[k][parlist[s]]*tep; 
+            for(j=0; j<s; j++) tep*=10; 
+            // ^^ This assumes that all the nodes have 10 or less
+            // states.
+            parent_state += datax[k][parlist[s]]*tep; 
            }
-        num=num00*10+datax[k][x[i]]; 
+        node_state = parent_state*10+datax[k][x[i]]; 
         // ^^ Encode the current data row's state and parent values as a
         // numparents+1 digit decimal number. For data sets with too many
         // nodes >32 or >64, we should worry about overflow.
         //
-        // Also, encode just the parents values into decimal number num00
-        
+        // Also, encode just the parents values into decimal number parent_state
 
-        index = (Word_t) num;
-        JLI(Pvalue, Parray, index);
+        index = (Word_t) node_state;
+        JLI(Pvalue, node_p_array, index);
         ++(*Pvalue);
 
-        index = (Word_t) num00;
-        JLI(Pvalue, Parray00, index);
+        index = (Word_t) parent_state;
+        JLI(Pvalue, parent_array, index);
         ++(*Pvalue);
        } /* end data summary */
           
-    if(numparent>8){
-      printf("p %d ", numparent);
-    }
+    JLC(num_obs_pn_states, node_p_array, 0,-1);
+    JLC(num_obs_p_states, parent_array, 0,-1);
+     
 #ifdef DEBUG
-     if(numparent==1) { 
-       printf("count: %d, count00: %d, parstate*state: %d\n",
-           count,count00,(parstate+1)*state[x[i]]);
-       printf("numparent=%d parstate=%d\n", numparent, parstate);
+     if(x[i] == 0) { 
 
+       printf("\ni: %d \nm: %d \nx[i]: %d\nnumparents: %d \nparent: %d\ncount_parent: %d \
+           \ncount_parent_node: %d \nparstates: %d \nstates: %d \
+           \nparstate*state: %d\n", 
+            i, m, x[i], numparent, parlist[0], num_obs_p_states,num_obs_pn_states,parstate, 
+            state[x[i]], parstate*state[x[i]]);
+
+     printf("node_p_array:\n");
      index = 0;
-     JLF(Pvalue, Parray, index);
+     JLF(Pvalue, node_p_array, index);
      while (Pvalue != NULL)
      {
        printf("%lu %lu\n",index, *Pvalue);
-       JLN(Pvalue, Parray, index);
+       JLN(Pvalue, node_p_array, index);
      }
 
+     printf("parent_array:\n");
      index = 0;
-     JLF(Pvalue, Parray00, index);
+     JLF(Pvalue, parent_array, index);
      while (Pvalue != NULL)
      {
        printf("%lu %lu\n",index, *Pvalue);
-       JLN(Pvalue, Parray00, index);
+       JLN(Pvalue, parent_array, index);
      }
 
      }
 #endif //debug
 
-    JLC(count, Parray, 0,-1);
-    JLC(count00, Parray00, 0,-1);
-     
     alphaijk=prior_alpha/parstate/state[x[i]];
     alphaik=prior_alpha/parstate;
 
     accum = 0.0;
-    accum-=count*gammln(alphaijk);
-    accum+=count00*gammln(alphaik);
+    accum -= num_obs_pn_states*gammln(alphaijk);
+    accum += num_obs_p_states*gammln(alphaik);
 
     index = 0;
-    JLF(Pvalue, Parray, index);
+    JLF(Pvalue, node_p_array, index);
     while (Pvalue != NULL)
     {
-     accum+=gammln((*Pvalue) + alphaijk);
-     JLN(Pvalue, Parray, index);
+     accum += gammln((*Pvalue) + alphaijk);
+     JLN(Pvalue, node_p_array, index);
     }
 
     index = 0;
-    JLF(Pvalue, Parray00, index);
+    JLF(Pvalue, parent_array, index);
     while (Pvalue != NULL)
     {
-     accum-=gammln((*Pvalue) + alphaik);
-     JLN(Pvalue, Parray00, index);
+     accum -= gammln((*Pvalue) + alphaik);
+     JLN(Pvalue, parent_array, index);
     }
 
-    JLFA(count, Parray);
-    JLFA(count00, Parray00);
+    JLFA(num_obs_p_states, node_p_array);
+    JLFA(num_obs_pn_states, parent_array);
 
    fvalue[i] += accum;
    fvalue[i] *= -1.0;
+
+#ifdef DEBUG
+   printf("i: %d\t x[i]: %d\t fvalue[i]: %f\t fvalue[x[i]]: %f\n",i, x[i], fvalue[i], fvalue[x[i]]);
+#endif
 
   }
 ABC:
