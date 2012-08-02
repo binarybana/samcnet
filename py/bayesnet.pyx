@@ -23,31 +23,36 @@ cdef class BayesNet:
   cdef:
     int **cmat, **cdata
     double **ctemplate
-  def __init__(self, nodes, states, data, template=None):
+  def __init__(self, nodes, states, data, template=None, priorweight=1.0):
     """
     nodes: a list of strings for the nodes
     states: a list of number of states for each node
     data: a matrix with each row being a draw from the Bayesian network 
       with each entry being [0..n_i-1]
-    template: A matrix of doubles giving strength to the various connections
+    template: A matrix of doubles \in[0,1.0] giving strength to the various connections
     Initializes the BayesNet as a set of independent nodes
     """
     self.nodes = nodes
     self.states = np.asarray(states,dtype=np.int32)
     self.data = np.asarray(data,dtype=np.int32)
-    if template != None:
-      self.template = np.asarray(template, dtype=np.double)
-      self.ctemplate = npy2c_double(self.template)
 
     self.graph = nx.DiGraph()
     self.graph.add_nodes_from(nodes)
 
     self.limparent = 4
     self.prior_alpha = 1.0
-    self.prior_gamma = 0.1111
+    self.prior_gamma = priorweight
 
     self.data_num = data.shape[0]
     self.node_num = data.shape[1]
+
+    if template == None:
+      self.template = np.zeros((self.node_num, self.node_num), dtype=np.double)
+    else:
+      self.template = np.asarray(template.copy(), dtype=np.double)
+
+    np.fill_diagonal(self.template, 1.0) 
+    self.ctemplate = npy2c_double(self.template)
 
     self.x = np.arange(self.node_num, dtype=np.int32)
     np.random.shuffle(self.x) # We're going to make this a 0-9 permutation
@@ -154,6 +159,7 @@ cdef class BayesNet:
 
   def energy(self):
     """ Calculate the -log probability. """
+    cdef double prior
     cdef np.ndarray[np.int32_t, ndim=1, mode="c"] x = \
         self.x
     cdef np.ndarray[np.int32_t, ndim=1, mode="c"] states = \
@@ -170,11 +176,13 @@ cdef class BayesNet:
                 self.cdata,
                 self.prior_alpha,
                 self.prior_gamma,
+                self.ctemplate,
                 <int*> x.data,
                 self.cmat,
                 <double*> fvalue.data,
                 <int*> changelist.data,
                 self.changelength)
+
     return energy
 
   def reject(self):

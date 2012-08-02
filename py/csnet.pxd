@@ -6,6 +6,7 @@ cdef extern from "cost.h":
                 int **datax,
                 double prior_alpha,
                 double prior_gamma,
+                double **priormat,
                 int *x, 
                 int **mat, 
                 double *fvalue, 

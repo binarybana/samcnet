@@ -83,7 +83,10 @@ def generateData(graph, numPoints=50, noise=0.5, cpds=None):
 def sampleTemplate(graph, numEdges=3):
     edges = graph.edges()
     ra.shuffle(edges)
-    return edges[:numEdges]
+    new = graph.copy()
+    new.remove_edges_from(new.edges())
+    new.add_edges_from(edges[:numEdges])
+    return new
 
 #x = generateHourGlassGraph(10, 2)
 #visualizeGraph(x)

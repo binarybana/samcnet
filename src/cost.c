@@ -10,6 +10,7 @@ double cost(int node_num,
         int **datax,
         double prior_alpha,
         double prior_gamma,
+        double **priormat,
         int *x, 
         int **mat, 
         double *fvalue, 
@@ -18,7 +19,7 @@ double cost(int node_num,
 {
   int num_obs_p_states, num_obs_pn_states, node_state, parent_state, i, j, k, m, s, tep;
   int numparent, parstate, parlist[node_num];
-  double sum;
+  double sum, priordiff;
   double accum = 0.0;
   double alphaijk = 0.0;
   double alphaik = 0.0;
@@ -41,11 +42,18 @@ double cost(int node_num,
     numparent = s; // tot num of parents
 
     // Structure Prior, in log form:
-    fvalue[i] = numparent*log(prior_gamma);
+    priordiff = 0.0;
+    for(j=0; j<node_num; j++){
+        if(j!=i || x[j]!=x[j]){
+            priordiff += abs((double)mat[j][i] - priormat[x[j]][x[i]]);
+        }
+    }
+    fvalue[i] = -(priordiff+numparent)*prior_gamma;
 
     // Number of parents limited to limparent
     if(numparent>limparent){ 
-       for(j=0; j<node_num; j++) fvalue[j]=1.0e+100;
+       /*for(j=0; j<node_num; j++) fvalue[j]=1.0e+100;*/
+       fvalue[i]=1.0e+100;
        goto ABC;
       }
     
