@@ -1,6 +1,7 @@
 import pylab as p
 import os
 import networkx as nx
+import numpy as np
 import pandas as pa
 import pebl as pb
 import StringIO as si
@@ -13,6 +14,17 @@ def plotHist(s):
     p.subplot(212)
     p.plot(s.hist[0], s.hist[2], 'go')
     p.title('Sample Counts')
+
+def plotThetas(s):
+  self = s
+  if type(self.db) == list:
+    thetas = np.array([x['theta'] for x in self.db])
+    nets = self.db
+  else:
+    thetas = self.db.root.samples[:]['theta']
+    nets = self.db.root.samples[:]
+  part = np.exp(thetas - thetas.max())
+  p.hist(part, log=True, bins=100)
     
 def drawGraph(graph, show=False):
     fname = os.tempnam()
@@ -41,8 +53,10 @@ def drawGraphs(*args, **kwargs):
     combo = tempfile.mkstemp(suffix='.png')
     os.close(combo[0])
     os.popen('convert %s +append -quality 75 %s' % (' '.join(zip(*files)[1]), combo[1]))
-    if 'show' in kwargs and kwargs['show']:
-        os.popen('xdg-open %s > /dev/null' % combo[1])
+    if 'show' in kwargs and not kwargs['show']:
+      pass
+    else:
+      os.popen('xdg-open %s > /dev/null' % combo[1])
 
     for f in files:
         os.unlink(f[1])

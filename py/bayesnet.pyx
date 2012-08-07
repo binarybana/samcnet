@@ -50,6 +50,7 @@ cdef class BayesNet:
       self.template = np.zeros((self.node_num, self.node_num), dtype=np.double)
     else:
       self.template = np.asarray(template.copy(), dtype=np.double)
+      #self.template = np.asarray(nx.to_numpy_matrix(template.copy()), dtype=np.double) 
 
     np.fill_diagonal(self.template, 1.0) 
     self.ctemplate = npy2c_double(self.template)
@@ -99,12 +100,11 @@ cdef class BayesNet:
 
   def save_to_db(self, db, energy, theta, region):
     if type(db) == list:
-      pass
-      #db.append({'matrix': self.mat,
-        #'x': self.x,
-        #'energy': energy,
-        #'theta' : theta,
-        #'region': region})
+      db.append({'matrix': self.mat,
+        'x': self.x,
+        'energy': energy,
+        'theta' : theta,
+        'region': region})
     else:
       self.table.row['matrix'] = self.mat#[s].T[s].T
       self.table.row['energy'] = energy
@@ -112,7 +112,6 @@ cdef class BayesNet:
       self.table.row['region'] = region
       self.table.row['x'] = self.x
       self.table.row.append()
-      db.flush()
 
   def update_graph(self, matx=None):
     if matx:

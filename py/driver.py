@@ -34,43 +34,64 @@ def test():
 
     return b, SAMCRun(b)#'db.h5')
 
+def edge_presence(net):
+    return net['matrix'][net['x'][0],net['x'][3]]
+
+def runSAMC(states, data, template, db):
+  nodes = np.arange(data.shape[1])
+  b = BayesNet(nodes,states,data,template=template)
+  s = SAMCRun(b,db)
+  t1 = time()
+  s.sample(iters)
+  t2 = time()
+  print("SAMC run took %f seconds." % (t2-t1))
+  
+  print s.estimate_func_mean(edge_presence)
+  t3 = time()
+  print("Mean estimation run took %f seconds." % (t3-t2))
+  return b, s
+
+def runFullSAMC(graph, iters, numtemplate, numdata, priorweight, db):
+  #tmat = (np.asarray(nx.to_numpy_matrix(template))+0.5).clip(0,1)
+  template = sampleTemplate(graph, numtemplate)
+  tmat = np.asarray(nx.to_numpy_matrix(template))
+  traindata, states, cpds = generateData(graph,numdata)
+  nodes = np.arange(graph.number_of_nodes())
+  b,s = runSAMC(states, traindata, tmat, db)
+  return template, cpds, b, s
+
 np.random.seed(1234)
 random.seed(1234)
 
-N = 15
-iters = 9e4
-numdata = 100
-priorweight=1
+N = 5
+iters = 3e5
+numdata = 500
+priorweight = 10
+numtemplate = 3
+db = 'memory'
 
 graph = generateHourGlassGraph(nodes=N)
-template = sampleTemplate(graph, 5)
-tmat = (np.asarray(nx.to_numpy_matrix(template))+0.5).clip(0,1)
-tmat2 = np.asarray(nx.to_numpy_matrix(template))
+
+fname = 'trash.h5'
+if os.path.exists(fname):
+  os.remove(fname)
+
+template = sampleTemplate(graph, numtemplate)
+tmat = np.asarray(nx.to_numpy_matrix(template))
 traindata, states, cpds = generateData(graph,numdata)
 nodes = np.arange(graph.number_of_nodes())
 
-b = BayesNet(nodes,states,traindata)
-b2 = BayesNet(nodes,states,traindata,tmat,priorweight=priorweight)
-b3 = BayesNet(nodes,states,traindata,tmat2,priorweight=priorweight)
+b,s = runSAMC(states, traindata, tmat, db)
+b2,s2 = runSAMC(states, traindata, tmat, db)
 
-s = SAMCRun(b)
-s2 = SAMCRun(b2)
-s3 = SAMCRun(b3)
+#temp2,_,b2,s2 = runFullSAMC(graph, iters, numtemplate, numdata, priorweight, 'memory')
+#temp,_,b,s = runFullSAMC(graph, iters, numtemplate, numdata, priorweight, 'trash.h5')
 
-t1 = time()
-s.sample(iters)
-t2 = time()
-s2.sample(iters)
-t3 = time()
-s3.sample(iters)
-
-print("SAMC 1 took %f seconds" % (t2-t1))
-print("SAMC 2 took %f seconds" % (t3-t2))
+#sys.exit()
 
 b.update_graph(s.mapvalue)
 b2.update_graph(s2.mapvalue)
-b3.update_graph(s3.mapvalue)
-drawGraphs(graph, template, b.graph, b2.graph, b3.graph, show=True)
+drawGraphs(graph, template, b.graph, b2.graph)
 
 #dataset = to_pebl(states, traindata)
 

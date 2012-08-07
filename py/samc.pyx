@@ -4,6 +4,7 @@ from libc.math cimport exp, ceil, floor
 import tables as tb
 import sys
 import os
+from itertools import izip
 
 import numpy as np
 cimport numpy as np
@@ -31,8 +32,18 @@ cdef class SAMCRun:
   def set_energy_limits(self):
     cdef int i
     cdef double oldenergy, energy, low, high, spread
+
+    if self.iteration > 0:
+      print "Reading energy limits from file."
+      self.lowEnergy = <int> self.hist[0,0]
+      self.highEnergy = <int> self.hist[0,-1]
+      return
+
     print "Establishing energy limits... ",
     low = high = oldenergy = energy = self.obj.energy()
+    while high > 1e90:
+      self.obj.propose()
+      low = high = oldenergy = energy = self.obj.energy()
     for i in range(2000):
       self.obj.propose()
       energy = self.obj.energy() 
@@ -45,7 +56,6 @@ cdef class SAMCRun:
         oldenergy = energy
       else:
         self.obj.reject()
-
 
     spread = high - low
     if spread < 1000:
@@ -61,7 +71,7 @@ cdef class SAMCRun:
     self.highEnergy = <int>high
     self.grid = <int>ceil((self.highEnergy - self.lowEnergy) * self.scale)
     self.refden = np.arange(self.grid, 0, -1, dtype=np.double)
-    self.refden = self.refden**2
+    self.refden = self.refden**4
     #self.refden = np.ones(self.grid, dtype=np.double)
 
     self.refden /= self.refden.sum()
@@ -71,14 +81,19 @@ cdef class SAMCRun:
     self.indicator = np.zeros((self.grid),dtype=np.int32) # Indicator is whether we have visited a region yet
 
   def clear(self):
-    if self.db == 'memory':
+    if type(self.db) == list:
       self.db = []
+      self.init_db('memory')
     else:
-      fname = self.db.filename
-      self.db.close()
-      os.remove(fname)
-
-    self.init_db(fname)
+      try:
+        fname = self.db.filename
+        self.db.close()
+        print "Removing database file %s." % fname
+        os.remove(fname)
+      except OSError:
+        print "Error cleaning up database, cannot delete file %s." % fname
+      finally:
+        self.init_db(fname)
 
   def init_db(self,db):
     self.mapenergy = np.inf
@@ -99,8 +114,32 @@ cdef class SAMCRun:
         self.iteration = self.db.getNodeAttr('/','iteration')
         self.accept_loc = self.db.getNodeAttr('/','accept_loc')
         self.total_loc = self.db.getNodeAttr('/','total_loc')
+        self.hist = self.db.getNodeAttr('/','hist')
+        self.grid = self.db.getNodeAttr('/','grid')
+        self.indicator = self.db.getNodeAttr('/','indicator')
+        self.refden = self.db.getNodeAttr('/','refden')
 
       self.obj.init_db(self.db) # Only for pytables dbs
+
+  def estimate_func_mean(self, func):
+    """ Using the supplied function, estimate the mean of the function
+    on the random samples.
+
+    It might be best to sort the values first for numerical stability,
+    but we'll worry about that later.
+    """
+    if type(self.db) == list:
+      thetas = np.array([x['theta'] for x in self.db])
+      nets = self.db
+    else:
+      thetas = self.db.root.samples[:]['theta']
+      nets = self.db.root.samples[:]
+
+    part = np.exp(thetas - thetas.max())
+    numerator = (part * np.array([func(x) for x in nets])).sum()
+    denom = part.sum()
+    print "Calculating function mean: %g / %g." % (numerator, denom)
+    return numerator / denom
 
   def save_attribs(self):
     if type(self.db) != list:
@@ -110,6 +149,11 @@ cdef class SAMCRun:
       self.db.setNodeAttr('/','iteration',self.iteration)
       self.db.setNodeAttr('/','accept_loc',self.accept_loc)
       self.db.setNodeAttr('/','total_loc',self.total_loc)
+      self.db.setNodeAttr('/','hist',self.hist)
+      self.db.setNodeAttr('/','grid',self.grid)
+      self.db.setNodeAttr('/','indicator',self.indicator)
+      self.db.setNodeAttr('/','refden',self.refden)
+      self.db.flush()
 
   def __del__(self):
     self.save_attribs()
@@ -122,7 +166,7 @@ cdef class SAMCRun:
     else: 
       return floor((energy-self.lowEnergy)*self.scale)
 
-  @cython.boundscheck(False) # turn of bounds-checking for entire function
+  @cython.boundscheck(False) # turn off bounds-checking for entire function
   def sample(self, iters, thin=1):
     cdef int current_iter, accept, oldregion, newregion, i, nonempty
     cdef double oldenergy, newenergy, r, un
@@ -210,13 +254,11 @@ cdef class SAMCRun:
       pass
     self.hist[1] = hist
     self.indicator = indicator
+
     ###### Calculate summary statistics #######
     print("Accept_loc: %d" % self.accept_loc)
     print("Total_loc: %d" % self.total_loc)
     print("Acceptance: %f" % (float(self.accept_loc)/float(self.total_loc)))
 
     self.save_attribs()
-
-    #self.obj.update_graph(self.mapvalue) #will cause incorrect chain behavior
-    #self.obj.to_dot()
 
