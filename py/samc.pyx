@@ -71,7 +71,7 @@ cdef class SAMCRun:
     self.highEnergy = <int>high
     self.grid = <int>ceil((self.highEnergy - self.lowEnergy) * self.scale)
     self.refden = np.arange(self.grid, 0, -1, dtype=np.double)
-    self.refden = self.refden**4
+    self.refden = self.refden**2
     #self.refden = np.ones(self.grid, dtype=np.double)
 
     self.refden /= self.refden.sum()

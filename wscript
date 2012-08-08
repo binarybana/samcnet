@@ -15,6 +15,10 @@ def options(opt):
 def configure(conf):
     conf.load('compiler_c python cython')
     conf.check_python_headers()
+    conf.check_python_module('numpy')
+    conf.check_python_module('scipy')
+    conf.check_python_module('networkx')
+    conf.check_python_module('pandas')
     conf.check(compiler='cc', lib='Judy', uselib_store='JUDY')
     conf.check(compiler='cc', lib='m', uselib_store='MATH')
     conf.check(compiler='cc', lib='profiler', uselib_store='PROFILER')
