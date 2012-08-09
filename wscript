@@ -15,9 +15,12 @@ def options(opt):
 def configure(conf):
     conf.load('compiler_c python cython')
     conf.check_python_headers()
+    conf.check_python_module('numpy')
+    conf.check_python_module('scipy')
+    conf.check_python_module('networkx')
+    conf.check_python_module('pandas')
     conf.check(compiler='cc', lib='Judy', uselib_store='JUDY')
     conf.check(compiler='cc', lib='m', uselib_store='MATH')
-    conf.check(compiler='cc', lib='profiler', uselib_store='PROFILER')
 
 def build(bld):
     libs = 'JUDY MATH'.split()
@@ -34,7 +37,6 @@ def build(bld):
         print('Adding profiling flag build')
         CFLAGS += ['-pg']
         LDFLAGS += ['-pg']
-        libs += ['PROFILER']
     if not bld.options.prof and not bld.options.debug: 
         CFLAGS += ['-O2']
 
