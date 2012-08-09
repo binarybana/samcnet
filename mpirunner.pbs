@@ -1,0 +1,15 @@
+#PBS -S /bin/sh
+#PBS -N samcmc
+#PBS -l nodes=3:ppn=8
+#PBS -j eo
+
+PBS_O_WORKDIR=/home/jason/samc/samcsynthetic-0.2/py/
+cd $PBS_O_WORKDIR
+
+export LD_LIBRARY_PATH=/share/apps/lib:../build
+export PATH=/share/apps/bin:$PATH
+export PATH=/opt/mpi/bin:$PATH
+
+MPIRUN="mpirun -machinefile $PBS_NODEFILE --mca btl ^udapl,openib --mca btl_tcp_if_include eth0 -np $NPROCS"
+
+$MPIRUN python ./mpitest.py 20000000

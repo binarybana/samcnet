@@ -21,7 +21,6 @@ def configure(conf):
     conf.check_python_module('pandas')
     conf.check(compiler='cc', lib='Judy', uselib_store='JUDY')
     conf.check(compiler='cc', lib='m', uselib_store='MATH')
-    conf.check(compiler='cc', lib='profiler', uselib_store='PROFILER')
 
 def build(bld):
     libs = 'JUDY MATH'.split()
@@ -38,7 +37,6 @@ def build(bld):
         print('Adding profiling flag build')
         CFLAGS += ['-pg']
         LDFLAGS += ['-pg']
-        libs += ['PROFILER']
     if not bld.options.prof and not bld.options.debug: 
         CFLAGS += ['-O2']
 
