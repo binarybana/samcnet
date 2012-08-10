@@ -1,6 +1,9 @@
-import sys, shutil, os
+#!/share/apps/bin/python
+from mpi4py import MPI
+import sys, shutil, os, sha
+import ConfigParser as cp
 
-sys.path.append('../build')
+sys.path.append('./build')
 
 from samc import SAMCRun
 from bayesnet import BayesNet
@@ -9,110 +12,93 @@ from utils import *
 
 import random
 from time import time
-import pygraphviz as pgv
 import numpy as np
-#import pebl as pb
-#import pstats, cProfile
+import redis
 
-#cProfile.runctx("b,s=test(); s.sample(10000)", globals(), locals(), "prof.stat")
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size = comm.Get_size()
 
-#s = pstats.Stats("prof.stat")
-#s.strip_dirs().sort_stats("time").print_stats()
+if len(sys.argv) != 3:
+    sys.exit("Usage: driver.py <configfile.cfg> <num of runs>")
 
-def test():
-    traindata = np.loadtxt('../data/WBCD2.dat', dtype=np.int32)
-    cols = traindata.shape[1]
-    states = np.ones((cols,), dtype=np.int32)
-    nodes = np.arange(cols)
+config = cp.RawConfigParser()
+print("Reading configuration information from %s." % sys.argv[1])
+config.read(sys.argv[1])
 
-    traindata[:,:-1] -= 1
-    traindata[:,-1] += 1
+N = config.getfloat('General', 'nodes')
+iters = config.getfloat('General', 'samc-iters')
+numdata = config.getint('General', 'numdata')
+priorweight = config.getfloat('General', 'priorweight')
+numtemplate = config.getint('General', 'numtemplate')
+db = config.get('General', 'db')
 
-    states[:-1] = 10
-    states[-1] = 2
-    b = BayesNet(nodes,states,traindata)
+#def indiv_edge_presence(net):
+  #return net['matrix'][net['x'][0],net['x'][3]]
 
-    return b, SAMCRun(b)#'db.h5')
+def calculate_mean():
+    graph = generateHourGlassGraph(nodes=N)
+    gmat = np.asarray(nx.to_numpy_matrix(graph))
 
-def runSAMC(states, data, template, db, func):
-  nodes = np.arange(data.shape[1])
-  b = BayesNet(nodes,states,data,template=template)
-  s = SAMCRun(b,db)
-  t1 = time()
-  s.sample(iters)
-  t2 = time()
-  print("SAMC run took %f seconds." % (t2-t1))
-  
-  print s.estimate_func_mean(func)
-  t3 = time()
-  print("Mean estimation run took %f seconds." % (t3-t2))
-  return b, s
+    def global_edge_presence(net):
+        s = net['x'].argsort()
+        ordmat = net['matrix'][s].T[s].T
+        return np.abs(gmat - ordmat).sum() / net['x'].shape[0]**2
 
-def runFullSAMC(graph, iters, numtemplate, numdata, priorweight, db):
-  #tmat = (np.asarray(nx.to_numpy_matrix(template))+0.5).clip(0,1)
-  template = sampleTemplate(graph, numtemplate)
-  tmat = np.asarray(nx.to_numpy_matrix(template))
-  traindata, states, cpds = generateData(graph,numdata)
-  nodes = np.arange(graph.number_of_nodes())
-  b,s = runSAMC(states, traindata, tmat, db)
-  return template, cpds, b, s
+    template = sampleTemplate(graph, numtemplate)
+    tmat = np.asarray(nx.to_numpy_matrix(template))
+    traindata, states, cpds = generateData(graph,numdata)
+    nodes = np.arange(graph.number_of_nodes())
 
-#np.random.seed(1234)
-#random.seed(1234)
+    nodes = np.arange(traindata.shape[1])
+    b = BayesNet(nodes,states,traindata,template=tmat)
+    s = SAMCRun(b,db)
 
-N = 5
-iters = 1e4
-numdata = 50
-priorweight = 1
-numtemplate = 3
-db = 'memory'
+    t1 = time()
+    s.sample(iters)
+    t2 = time()
 
-graph = generateHourGlassGraph(nodes=N)
-gmat = np.asarray(nx.to_numpy_matrix(graph))
+    print("SAMC run took %f seconds." % (t2-t1))
 
-def indiv_edge_presence(net):
-  return net['matrix'][net['x'][0],net['x'][3]]
+    func_mean = s.estimate_func_mean(global_edge_presence)
+    t3 = time()
+    print("Mean estimation run took %f seconds." % (t3-t2))
 
-def global_edge_presence(net):
-  s = net['x'].argsort()
-  ordmat = net['matrix'][s].T[s].T
-  return np.abs(gmat - ordmat).sum() / net.shape[0]**2
+    # Send back func_mean to store
+    return func_mean
 
-template = sampleTemplate(graph, numtemplate)
-tmat = np.asarray(nx.to_numpy_matrix(template))
-traindata, states, cpds = generateData(graph,numdata)
-nodes = np.arange(graph.number_of_nodes())
+#meta_iters = config.getint('General', 'meta_iters')
+meta_iters = int(sys.argv[2])
 
-b,s = runSAMC(states, traindata, tmat, db, global_edge_presence)
-#b2,s2 = runSAMC(states, traindata, tmat, db)
-
-#temp2,_,b2,s2 = runFullSAMC(graph, iters, numtemplate, numdata, priorweight, 'memory')
-#temp,_,b,s = runFullSAMC(graph, iters, numtemplate, numdata, priorweight, 'trash.h5')
-
-#sys.exit()
-
-#b.update_graph(s.mapvalue)
-#b2.update_graph(s2.mapvalue)
-#drawGraphs(graph, template, b.graph, b2.graph)
-
-#dataset = to_pebl(states, traindata)
-
-#t1 = time()
-#learner = pb.learner.simanneal.SimulatedAnnealingLearner(dataset, 
-        #start_temp=10000, delta_temp=0.8)
-##learner = pb.learner.simanneal.SimulatedAnnealingLearner(dataset, 
-        ##pb.prior.UniformPrior(N), start_temp=10000, delta_temp=0.9)
-#ex1result = learner.run()
-#t2 = time()
+configtext = open(sys.argv[1], 'r').read()
+hash = sha.sha(configtext).hexdigest()
+basename = os.path.basename(sys.argv[1])
+#runtop = 'runs/'+basename
+#runsafe = 'runs/'+basename+'/'+hash
 
 #try:
-    #shutil.rmtree('example-result')
+    #os.mkdir(runtop)
+    #os.mkdir(runsafe)
 #except:
     #pass
-#ex1result.tohtml('example-result')
 
-#print("Simulated Annealing took %f seconds" % (t2-t1))
+#shutil.copy(sys.argv[1], runsafe)
+
+r = redis.StrictRedis(host='kubera.local')
+
+if rank == 0:
+    r.hset('key-fname', hash, basename)
+    r.hset('key-config', hash, configtext)
+    r.hset('key-reverse', basename, hash)
+   
+#Calculate how many meta_iters we need
+if rank < (meta_iters % size):
+    local_meta_iters = meta_iters / size + 1
+else:
+    local_meta_iters = meta_iters / size
 
 
-#os.popen('xdg-open example-result/index.html > /dev/null')
+for i in range(local_meta_iters):
+    r.lpush(hash, calculate_mean())
 
+MPI.Finalize()

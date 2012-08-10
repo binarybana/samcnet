@@ -185,73 +185,71 @@ cdef class SAMCRun:
     print("Initial Energy: %g" % oldenergy)
     #fid = open("rlogpy2",'w')
 
-    try:
-      for current_iter in range(self.iteration, self.iteration + int(iters)):
-        self.iteration += 1
+    for current_iter in range(self.iteration, self.iteration + int(iters)):
+      self.iteration += 1
 
-        self.delta = float(self.stepscale) / max(self.stepscale, self.iteration)
+      self.delta = float(self.stepscale) / max(self.stepscale, self.iteration)
 
-        self.obj.propose()
-        newenergy = self.obj.energy()
+      self.obj.propose()
+      newenergy = self.obj.energy()
 
-        if newenergy < self.mapenergy: # NB: Even if not accepted
-          self.mapenergy = newenergy
-          self.mapvalue = self.obj.copy()
-    
-        ####### acceptance of new moves #########
+      if newenergy < self.mapenergy: # NB: Even if not accepted
+        self.mapenergy = newenergy
+        self.mapvalue = self.obj.copy()
+  
+      ####### acceptance of new moves #########
 
-        newregion = self.find_region(newenergy)
+      newregion = self.find_region(newenergy)
 
-        indicator[newregion] = 1
+      indicator[newregion] = 1
 
-        r = hist[oldregion] - hist[newregion] + (oldenergy-newenergy) #/self.temperature
-        
-        #fid.write("%f,%f,%f,%f,%f,%f\n" % (hist[oldregion], hist[newregion], oldenergy,
-          #newenergy, r, self.obj.lastscheme))
-        
-        #print("r:%f\t oldregion:%d\t hist[old]:%f\t hist[new]:%f fold:%f, fnew:%f" %
-            #(r,oldregion, hist[1,oldregion], hist[1,newregion], oldenergy, newenergy))
+      r = hist[oldregion] - hist[newregion] + (oldenergy-newenergy) #/self.temperature
+      
+      #fid.write("%f,%f,%f,%f,%f,%f\n" % (hist[oldregion], hist[newregion], oldenergy,
+        #newenergy, r, self.obj.lastscheme))
+      
+      #print("r:%f\t oldregion:%d\t hist[old]:%f\t hist[new]:%f fold:%f, fnew:%f" %
+          #(r,oldregion, hist[1,oldregion], hist[1,newregion], oldenergy, newenergy))
 
-        if r > 0.0 or np.random.rand() < exp(r):
-          accept=1
-        else:
-          accept=0;
+      if r > 0.0 or np.random.rand() < exp(r):
+        accept=1
+      else:
+        accept=0;
 
-        if accept == 0:
-          self.hist[2,oldregion] += 1.0
-          self.obj.reject()
-          self.total_loc += 1
-        elif accept == 1:
-          self.hist[2,newregion] += 1.0
-          self.accept_loc += 1
-          self.total_loc += 1
-          oldregion = newregion
-          oldenergy = newenergy
-           
-        locfreq[oldregion] += 1
-        hist += self.delta*(locfreq-refden)
-        locfreq[oldregion] -= 1
+      if accept == 0:
+        self.hist[2,oldregion] += 1.0
+        self.obj.reject()
+        self.total_loc += 1
+      elif accept == 1:
+        self.hist[2,newregion] += 1.0
+        self.accept_loc += 1
+        self.total_loc += 1
+        oldregion = newregion
+        oldenergy = newenergy
+         
+      locfreq[oldregion] += 1
+      hist += self.delta*(locfreq-refden)
+      locfreq[oldregion] -= 1
 
-        self.obj.save_to_db(self.db, oldenergy, hist[oldregion], oldregion)
+      self.obj.save_to_db(self.db, oldenergy, hist[oldregion], oldregion)
 
-        # VV I can't see what purpose this would serve from the paper (except
-        # maybe the varying truncation?)
-        #if current_iter == self.burn:
-          #i = 0
-          #while i<=self.grid and indicator[i] == 0:
-            #i+=1
-          #nonempty = i
-        #elif current_iter > self.burn: # FIXME BuG here as nonempty is not persisted
-          #un = hist[nonempty]
-          #for i in range(self.grid):
-            #if indicator[i] == 1:
-              #hist[i] -= un
-              
-        if self.iteration % 10000 == 0:
-          print("Iteration: %8d, delta: %5.2f, best energy: %7g, current energy: %7g" % \
-              (self.iteration, self.delta, self.mapenergy, newenergy))
-    except KeyboardInterrupt: 
-      pass
+      # VV I can't see what purpose this would serve from the paper (except
+      # maybe the varying truncation?)
+      #if current_iter == self.burn:
+        #i = 0
+        #while i<=self.grid and indicator[i] == 0:
+          #i+=1
+        #nonempty = i
+      #elif current_iter > self.burn: # FIXME BuG here as nonempty is not persisted
+        #un = hist[nonempty]
+        #for i in range(self.grid):
+          #if indicator[i] == 1:
+            #hist[i] -= un
+            
+      if self.iteration % 10000 == 0:
+        print("Iteration: %8d, delta: %5.2f, best energy: %7g, current energy: %7g" % \
+            (self.iteration, self.delta, self.mapenergy, newenergy))
+
     self.hist[1] = hist
     self.indicator = indicator
 

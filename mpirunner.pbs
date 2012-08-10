@@ -1,15 +1,17 @@
 #PBS -S /bin/sh
 #PBS -N samcmc
-#PBS -l nodes=3:ppn=8
+#PBS -l nodes=7:ppn=8
 #PBS -j eo
+#PBS -V
+#PSB -o ./logs
 
-PBS_O_WORKDIR=/home/jason/samc/samcsynthetic-0.2/py/
+PBS_O_WORKDIR=/home/jason/samc/samcsynthetic-0.2/
 cd $PBS_O_WORKDIR
 
-export LD_LIBRARY_PATH=/share/apps/lib:../build
+export LD_LIBRARY_PATH=/share/apps/lib:./build
 export PATH=/share/apps/bin:$PATH
 export PATH=/opt/mpi/bin:$PATH
 
 MPIRUN="mpirun -machinefile $PBS_NODEFILE --mca btl ^udapl,openib --mca btl_tcp_if_include eth0 -np $NPROCS"
 
-$MPIRUN python ./mpitest.py 20000000
+$MPIRUN python py/driver.py $SAMC_JOB_CFG $SAMC_JOB_RUNS
