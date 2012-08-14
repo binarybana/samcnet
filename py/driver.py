@@ -1,42 +1,40 @@
-#!/share/apps/bin/python
-from mpi4py import MPI
-import sys, shutil, os, sha
-import ConfigParser as cp
+if __name__ == '__channelexec__' or __name__=='__main__':
+    import sys, os, io
+    import numpy as np
+    import networkx as nx
+    import ConfigParser as cp
 
-sys.path.append('./build')
+    from time import time
 
-from samc import SAMCRun
-from bayesnet import BayesNet
-from generator import generateHourGlassGraph, generateData, sampleTemplate
-from utils import *
+    sys.path.append('../build')
+    sys.path.append('./build') # Yuck!
 
-import random
-from time import time
-import numpy as np
-import redis
+    from samc import SAMCRun
+    from bayesnet import BayesNet
+    from generator import *
 
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-size = comm.Get_size()
+    #Just for now...
+    test = """
+[General]
+nodes = 5
+samc-iters=5e5
+numdata=50
+priorweight=10
+numtemplate=5
+    """
+    os.environ['SAMC_CONFIG'] = test
+    print test.encode('ascii')
 
-if len(sys.argv) != 3:
-    sys.exit("Usage: driver.py <configfile.cfg> <num of runs>")
+    config = cp.RawConfigParser()
+    config.readfp(io.BytesIO(os.environ['SAMC_CONFIG']))
 
-config = cp.RawConfigParser()
-print("Reading configuration information from %s." % sys.argv[1])
-config.read(sys.argv[1])
+    N = config.getfloat('General', 'nodes')
+    iters = config.getfloat('General', 'samc-iters')
+    numdata = config.getint('General', 'numdata')
+    priorweight = config.getfloat('General', 'priorweight')
+    numtemplate = config.getint('General', 'numtemplate')
+    #db = config.get('General', 'db')
 
-N = config.getfloat('General', 'nodes')
-iters = config.getfloat('General', 'samc-iters')
-numdata = config.getint('General', 'numdata')
-priorweight = config.getfloat('General', 'priorweight')
-numtemplate = config.getint('General', 'numtemplate')
-db = config.get('General', 'db')
-
-#def indiv_edge_presence(net):
-  #return net['matrix'][net['x'][0],net['x'][3]]
-
-def calculate_mean():
     graph = generateHourGlassGraph(nodes=N)
     gmat = np.asarray(nx.to_numpy_matrix(graph))
 
@@ -52,53 +50,19 @@ def calculate_mean():
 
     nodes = np.arange(traindata.shape[1])
     b = BayesNet(nodes,states,traindata,template=tmat)
-    s = SAMCRun(b,db)
+    s = SAMCRun(b)
 
     t1 = time()
     s.sample(iters)
     t2 = time()
-
     print("SAMC run took %f seconds." % (t2-t1))
-
     func_mean = s.estimate_func_mean(global_edge_presence)
     t3 = time()
     print("Mean estimation run took %f seconds." % (t3-t2))
 
     # Send back func_mean to store
-    return func_mean
+    if __name__ == '__channelexec__':
+      channel.send(float(func_mean))
+    else:
+      print(func_mean)
 
-#meta_iters = config.getint('General', 'meta_iters')
-meta_iters = int(sys.argv[2])
-
-configtext = open(sys.argv[1], 'r').read()
-hash = sha.sha(configtext).hexdigest()
-basename = os.path.basename(sys.argv[1])
-#runtop = 'runs/'+basename
-#runsafe = 'runs/'+basename+'/'+hash
-
-#try:
-    #os.mkdir(runtop)
-    #os.mkdir(runsafe)
-#except:
-    #pass
-
-#shutil.copy(sys.argv[1], runsafe)
-
-r = redis.StrictRedis(host='kubera.local')
-
-if rank == 0:
-    r.hset('key-fname', hash, basename)
-    r.hset('key-config', hash, configtext)
-    r.hset('key-reverse', basename, hash)
-   
-#Calculate how many meta_iters we need
-if rank < (meta_iters % size):
-    local_meta_iters = meta_iters / size + 1
-else:
-    local_meta_iters = meta_iters / size
-
-
-for i in range(local_meta_iters):
-    r.lpush(hash, calculate_mean())
-
-MPI.Finalize()
