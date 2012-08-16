@@ -155,8 +155,8 @@ cdef class SAMCRun:
       self.db.setNodeAttr('/','refden',self.refden)
       self.db.flush()
 
-  def __del__(self):
-    self.save_attribs()
+  #def __del__(self):
+    #self.save_attribs()
 
   cdef find_region(self, energy):
     if energy > self.highEnergy: 

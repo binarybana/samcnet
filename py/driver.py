@@ -1,25 +1,21 @@
-import sys, os, io
+import sys, os
 import redis
 import sha
 import atexit
-import numpy as np
-import networkx as nx
-import ConfigParser as cp
+import subprocess as sb
+import logging
+import logging.handlers
+
+h = logging.handlers.SysLogHandler(('knight-server.dyndns.org',10514))
+h.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(name)s: samc %(levelname)s %(message)s')
+h.setFormatter(formatter)
+logger = logging.getLogger()
+logger.addHandler(h)
+logger.setLevel(logging.DEBUG)
+
 
 from time import time, sleep
-
-sys.path.append('../build')
-sys.path.append('./build') # Yuck!
-
-try:
-  from samc import SAMCRun
-  from bayesnet import BayesNet
-  from generator import *
-except ImportError as e:
-  print(e)
-  print("Make sure LD_LIBRARY_PATH is set correctly and that the build"+\
-      " directory is populated by waf.")
-  sys.exit()
 
 r = redis.StrictRedis('knight-server.dyndns.org')
 
@@ -27,74 +23,102 @@ def getHost():
   return os.uname()[1].split('.')[0]
 
 def recordDeath():
-  r.lrem('clients-alive', 1, getHost())
+  r.zrem('clients-hb', getHost())
+
+def free(x):
+  return x == None or x.poll() != None
+
+def spawn(job, workhash):
+  env = os.environ
+  env['SAMC_JOB'] = job
+  env['WORKHASH'] = workhash
+  spec = 'python py/experiment.py'
+  return sb.Popen(spec.split(), env=env)
+  #return sb.Popen(spec.split(), env=env, stdout=null)
+
+def kill(spawn):
+  if spawn == None:
+    return
+  else: 
+    spawn.kill()
 
 atexit.register(recordDeath)
-r.rpush('clients-alive', getHost())
-print("Registered with db.")
 
+if len(sys.argv) != 2:
+    print 'Usage: ./driver.py <number of children>'
+    sys.exit()
+
+if sys.argv[1] == 'rebuild':
+  logger.info('Beginning dummy run for CDE rebuild')
+  capacity = 1
+  children = [None] * capacity
+  null = open('/dev/null','a')
+  cmd = r.get('die')
+  if getHost() == 'dummy':
+    x = 2
+  test = """
+[General]
+nodes = 5
+samc-iters=1e4
+numdata=50
+priorweight=10
+numtemplate=5"""
+  x = spawn(test, sha.sha(test).hexdigest())
+  x.wait()
+  sys.exit()
+
+else:
+  capacity = int(sys.argv[1])
+  children = [None] * capacity
+  null = open('/dev/null','a')
+
+logger.info('Connecting to db.')
 while True:
+  r.zadd('clients-hb', r.time()[0], getHost())
   cmd = r.get('die')
   if cmd == 'all' or cmd == getHost():
-    print("Received die command, shutting down.")
+    logging.info("Received die command, shutting down.")
+    for x in children:
+      kill(x)
+    r.zrem('clients-hb', getHost())
     break
 
-  with r.pipeline() as pipe:
-    queue = r.hgetall('desired-samples')
-    workhash = None
-    for h,num in queue.iteritems():
-      if int(num) > 0:
-        print("\nFound %s samples left on hash %s" % (num, h))
-        workhash = h
-    if workhash != None:
-      r.hincrby('desired-samples', workhash, -1)
+  freelist = filter(free, children)
+  if len(freelist) > 0:
+    logger.info('Found %d free children', len(freelist))
+  for x in freelist:
+    children.remove(x)
+  del freelist
+  freenum = capacity - len(children)
+  workhash = None
+  if freenum > 0:
+    with r.pipeline(transaction=True) as pipe:
+      queue = r.hgetall('desired-samples')
+      for h,num in queue.iteritems():
+        if int(num) > 0:
+          logging.info("Found %s samples left on hash %s" % (num, h))
+          workhash = h
+          break
+      if workhash != None:
+        # We found some work!
+        #grab = freenum if freenum < num else num
+        if freenum < num:
+          grab = freenum
+        else:
+          grab = num
+        r.hincrby('desired-samples', workhash, -1*grab)
 
   if workhash == None:
-    print 'sleep... '
+    logging.debug('sleeping for 2 seconds...')
     sleep(2)
     continue
+  else:
+    job = r.hget('configs', workhash)
+    logging.info('Spawning %d new children', grab)
+    newchildren = [spawn(job, workhash) for x in range(grab)]
+    children.extend(newchildren)
+    
 
-  job = r.hget('configs', workhash)
 
-  ########## Read config from Redis ########
-  config = cp.RawConfigParser()
-  config.readfp(io.BytesIO(job))
-
-  N = config.getfloat('General', 'nodes')
-  iters = config.getfloat('General', 'samc-iters')
-  numdata = config.getint('General', 'numdata')
-  priorweight = config.getfloat('General', 'priorweight')
-  numtemplate = config.getint('General', 'numtemplate')
-
-  ########### Actual simulation ############
-  graph = generateHourGlassGraph(nodes=N)
-  gmat = np.asarray(nx.to_numpy_matrix(graph))
-
-  def global_edge_presence(net):
-      s = net['x'].argsort()
-      ordmat = net['matrix'][s].T[s].T
-      return np.abs(gmat - ordmat).sum() / net['x'].shape[0]**2
-
-  template = sampleTemplate(graph, numtemplate)
-  tmat = np.asarray(nx.to_numpy_matrix(template))
-  traindata, states, cpds = generateData(graph,numdata)
-  nodes = np.arange(graph.number_of_nodes())
-
-  nodes = np.arange(traindata.shape[1])
-  b = BayesNet(nodes,states,traindata,template=tmat)
-  s = SAMCRun(b)
-
-  t1 = time()
-  s.sample(iters)
-  t2 = time()
-  print("SAMC run took %f seconds." % (t2-t1))
-  func_mean = s.estimate_func_mean(global_edge_presence)
-  t3 = time()
-  print("Mean estimation run took %f seconds." % (t3-t2))
-  ########### ################# ############
-
-  # Send back func_mean to store
-  r.lpush(workhash, func_mean)
-  print('Function mean: %f' % func_mean)
 
 

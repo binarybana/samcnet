@@ -70,16 +70,16 @@ cdef class BayesNet:
 
     self.lastscheme = -1
 
-  def __del__(self):
-    """ This should not be expected to run (google python's behavior
-    in __del__ to see why). But we really don't need it to. """
-    self.table.flush()
+  #def __del__(self):
+    #""" This should not be expected to run (google python's behavior
+    #in __del__ to see why). But we really don't need it to. """
+    #self.table.flush()
 
-  def __dealloc__(self):
-    """ Should deallocate self.cmat here, but since it is tied to 
-    c.mat, I don't really want to mess with it right now.
-    """
-    pass
+  #def __dealloc__(self):
+    #""" Should deallocate self.cmat here, but since it is tied to 
+    #c.mat, I don't really want to mess with it right now.
+    #"""
+    #pass
 
   def init_db(self, db):
     if '/samples' in db:

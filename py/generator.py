@@ -63,7 +63,7 @@ def generateData(graph, numPoints=50, noise=0.5, cpds=None):
     if not cpds:
         numparents = adj.sum(axis=0)
         #states = np.ones((numnodes,)) * 2 # assuming 2 states per node
-        states = np.random.randint(2,4, size=numnodes)
+        states = np.random.randint(2,3, size=numnodes)
         numparentstates = (states ** numparents)
         def cpdGen(states, parstates):
             return np.cumsum(np.random.dirichlet([1./states]*states))
