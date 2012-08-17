@@ -204,7 +204,7 @@ samc-iters=3e5
 numdata=10
 priorweight=500
 numtemplate=15"""
-  postJob(test, samples=200)
+  postJob(test, samples=20)
 
 elif goal == 'killall':
   kill('all')

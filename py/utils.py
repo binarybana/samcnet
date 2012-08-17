@@ -8,24 +8,58 @@ import StringIO as si
 import tempfile
 
 def plotHist(s):
-    p.subplot(211)
-    p.plot(s.hist[0], s.hist[1], 'go')
-    p.title('Energy - theta')
-    p.subplot(212)
-    p.plot(s.hist[0], s.hist[2], 'go')
-    p.title('Sample Counts')
+    rows = 3
+    cols = 2
 
-def plotThetas(s):
-  self = s
-  if type(self.db) == list:
-    thetas = np.array([x['theta'] for x in self.db])
-    nets = self.db
-  else:
-    thetas = self.db.root.samples[:]['theta']
-    nets = self.db.root.samples[:]
-  part = np.exp(thetas - thetas.max())
-  p.hist(part, log=True, bins=100)
-    
+    p.subplot(rows, cols, 1)
+    p.plot(s.hist[0], s.hist[1], 'k.')
+    p.title("Region's theta values")
+    p.ylabel('Theta')
+    p.xlabel('Energy')
+
+    p.subplot(rows, cols, 2)
+    p.plot(s.hist[0], s.hist[2], 'k.')
+    p.title("Region's Sample Counts")
+    p.ylabel('Count')
+    p.xlabel('Energy')
+
+    if type(s.db) == list:
+        energies = np.fromiter((x['energy'] for x in s.db), 
+            count=len(s.db), 
+            dtype=np.float)
+    else:
+        energies = s.db.root.samples[:]['energy']
+
+    p.subplot(rows, cols, 3)
+    p.plot(np.arange(s.burn, energies.shape[0]+s.burn), energies, 'k.')
+    p.title("Energy Trace")
+    p.ylabel('Energy')
+    p.xlabel('Iteration')
+
+    if type(s.db) == list:
+        thetas = np.fromiter((x['theta'] for x in s.db), 
+            count=len(s.db), 
+            dtype=np.float)
+    else:
+        thetas = s.db.root.samples[:]['theta']
+
+    p.subplot(rows, cols, 4)
+    p.plot(np.arange(s.burn, thetas.shape[0]+s.burn), thetas, 'k.')
+    p.ylabel('Theta Trace')
+    p.xlabel('Iteration')
+        
+    p.subplot(rows, cols, 5)
+    part = np.exp(thetas - thetas.max())
+    p.hist(part, log=True, bins=100)
+    p.xlabel('exp(theta - theta_max)')
+    p.ylabel('Number of samples at this value')
+    p.title('Histogram of normalized sample thetas from %d iterations' % thetas.shape[0])
+
+    p.subplot(rows, cols, 6)
+    p.hist(part, weights=part, bins=50)
+    p.xlabel('exp(theta - theta_max)')
+    p.ylabel('Amount of weight at this value')
+
 def drawGraph(graph, show=False):
     fname = os.tempnam()
     nx.write_dot(graph, fname+'.dot')
@@ -54,9 +88,9 @@ def drawGraphs(*args, **kwargs):
     os.close(combo[0])
     os.popen('convert %s +append -quality 75 %s' % (' '.join(zip(*files)[1]), combo[1]))
     if 'show' in kwargs and not kwargs['show']:
-      pass
+        pass
     else:
-      os.popen('xdg-open %s > /dev/null' % combo[1])
+        os.popen('xdg-open %s > /dev/null' % combo[1])
 
     for f in files:
         os.unlink(f[1])

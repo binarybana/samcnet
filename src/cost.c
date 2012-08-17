@@ -44,11 +44,13 @@ double cost(int node_num,
     // Structure Prior, in log form:
     priordiff = 0.0;
     for(j=0; j<node_num; j++){
-        if(j!=i || x[j]!=x[j]){
+        if(j!=i){
             priordiff += abs((double)mat[j][i] - priormat[x[j]][x[i]]);
         }
     }
     fvalue[i] = -(priordiff+numparent)*prior_gamma;
+    // FIXME Need to move this to the end, as it could cause small errors.
+    /*fvalue[i] = numparent*log(0.1111);*/
 
     // Number of parents limited to limparent
     if(numparent>limparent){ 
