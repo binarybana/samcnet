@@ -138,6 +138,7 @@ cdef class SAMCRun:
             thetas = self.db.root.samples[:]['theta']
             nets = self.db.root.samples[:]
 
+        assert thetas.shape[0] != 0
         part = np.exp(thetas - thetas.max())
         numerator = (part * np.array([func(x) for x in nets])).sum()
         denom = part.sum()

@@ -2,7 +2,10 @@ import sys, os, io
 import sha
 import numpy as np
 import networkx as nx
-import ConfigParser as cp
+try:
+    import simplejson as js
+except:
+    import json as js
 
 from time import time, sleep
 
@@ -19,12 +22,12 @@ except ImportError as e:
             " directory is populated by waf.")
     sys.exit()
 
-def sample(states, traindata, template=None, iters=1e4, priorweight=1.0):
+def sample(states, traindata, template=None, iters=1e4, priorweight=1.0, burn=100000):
     nodes = np.arange(traindata.shape[1])
-    tmat = np.asarray(nx.to_numpy_matrix(template)) if template else None
+    tmat = np.asarray(nx.to_numpy_matrix(template)) if template != None else None
 
     b = BayesNet(nodes, states, traindata, tmat, priorweight)
-    s = SAMCRun(b)
+    s = SAMCRun(b,burn=burn)
 
     t1 = time()
     s.sample(iters)
@@ -51,22 +54,24 @@ if 'SAMC_JOB' in os.environ and 'WORKHASH' in os.environ:
     r = redis.StrictRedis('knight-server.dyndns.org')
 
     ########## Read config from driver.py ########
-    config = cp.RawConfigParser()
-    config.readfp(io.BytesIO(os.environ['SAMC_JOB']))
+    config = js.loads(os.environ['SAMC_JOB'])
 
-    N = config.getfloat('General', 'nodes')
-    iters = config.getfloat('General', 'samc-iters')
-    numdata = config.getint('General', 'numdata')
-    priorweight = config.getfloat('General', 'priorweight')
-    numtemplate = config.getint('General', 'numtemplate')
+    N = int(config['nodes'])
+    iters = int(config['samc_iters'])
+    numdata = int(config['numdata'])
+    priorweight = float(config['priorweight'])
+    numtemplate = int(config['numtemplate'])
+    try:
+        burn = int(config['burn'])
+    except:
+        burn = 100000
 
     graph = generateHourGlassGraph(nodes=N)
     traindata, states, cpds = generateData(graph,numdata)
-    template = sampleTemplate(graph, numtemplate, iters)
-    tmat = np.asarray(nx.to_numpy_matrix(template))
-    b,s = sample(states, traindata, tmat, iters)
+    template = sampleTemplate(graph, numtemplate)
+    b,s = sample(states, traindata, template, iters, burn=burn)
     mean1 = estimateMean(s,graph)
-    b,s = sample(states, traindata, iters=iters)
+    b,s = sample(states, traindata, iters=iters, burn=burn)
     mean2 = estimateMean(s,graph)
     
     # Send back func_mean to store
@@ -97,7 +102,7 @@ elif __name__ == '__main__':
 
         template = sampleTemplate(graph, numtemplate)
         b,s = sample(states, traindata, template, iters, priorweight)
-        b2,s2 = sample(states, traindata, template=None, iters, priorweight)
+        b2,s2 = sample(states, traindata, template=None, iters=iters, priorweight=priorweight)
         mean1 = estimateMean(s,graph)
         mean2 = estimateMean(s2,graph)
 
