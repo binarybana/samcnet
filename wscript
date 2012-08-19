@@ -2,7 +2,7 @@
 # encoding: utf-8
 
 APPNAME = 'samcsynthetic'
-VERSION = '0.2'
+VERSION = '0.3'
 
 top = '.'
 out = 'build'
@@ -42,21 +42,21 @@ def build(bld):
 
     bld.env.CYTHONFLAGS = CYTHONFLAGS
 
-    bld.shlib(source = bld.path.ant_glob('src/*.c'), 
-                target='cost', 
-                cflags=CFLAGS,
-                linkflags=LDFLAGS,
-                use=libs)
+    bld.shlib(source = bld.path.ant_glob('samcnet/netcost/*.c'), 
+        target='cost', 
+        cflags=CFLAGS,
+        linkflags=LDFLAGS,
+        use=libs)
 
     bld(features='c cshlib pyext',
-        source=['py/samc.pyx'],
+        source=['samcnet/samc.pyx'],
         includes=[],
         libpath=['.','./build'],
         target='samc')
 
     bld(features='c cshlib pyext',
-        source=['py/bayesnet.pyx'],
-        includes=['src'],
+        source=['samcnet/bayesnet.pyx'],
+        includes=['samcnet/netcost'],
         use='cost',
         libpath=['.','./build'],
         target='bayesnet')

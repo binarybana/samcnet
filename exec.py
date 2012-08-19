@@ -7,7 +7,7 @@ try:
     import simplejson as js
 except:
     import json as js
-from py.server_configs import serverconfigs, syncgroups, cesg_small, cesg_large, gsp_compute
+from samcnet.server_configs import serverconfigs, syncgroups, cesg_small, cesg_large, gsp_compute
 
 LocalRoot = '/home/bana/GSP/research/samc/code'
 
@@ -16,10 +16,10 @@ def launchClient(host):
     if host.cde:
         spec = ('ssh {0.hostname} cd {0.root}/cde-package/cde-root/' \
                 + 'home/bana/GSP/research/samc/code; ').format(host) \
-                + ('{0.python} py/driver.py {1} &'.format(host,cores))
+                + ('{0.python} samcnet/driver.py {1} &'.format(host,cores))
     else:
         spec = ('ssh {0.hostname} cd {0.root};'.format(host) \
-                + ('LD_LIBRARY_PATH=./build:$LD_LIBRARY_PATH {0.python} py/driver.py {1} &'.format(host,cores)))
+                + ('LD_LIBRARY_PATH=./build:$LD_LIBRARY_PATH {0.python} samcnet/driver.py {1} &'.format(host,cores)))
 
     print "Connecting to %s." % host.hostname
     sb.Popen(shlex.split(spec), 
@@ -51,9 +51,9 @@ def updateCDE():
     print "Updating CDE package..." 
     os.environ['LD_LIBRARY_PATH']='./build:../build'
     os.chdir(LocalRoot)
-    p = sb.Popen('/home/bana/bin/cde python {0}/py/driver.py rebuild'.format(LocalRoot).split())
+    p = sb.Popen('/home/bana/bin/cde python {0}/samcnet/driver.py rebuild'.format(LocalRoot).split())
     p.wait()
-    p = sb.Popen('rsync -a py cde-package/cde-root/home/bana/GSP/research/samc/code/'.format(LocalRoot).split())
+    p = sb.Popen('rsync -a samcnet cde-package/cde-root/home/bana/GSP/research/samc/code/'.format(LocalRoot).split())
     p.wait()
     p = sb.Popen('rsync -a build cde-package/cde-root/home/bana/GSP/research/samc/code/'.format(LocalRoot).split())
     p.wait()

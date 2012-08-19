@@ -36,7 +36,7 @@ def spawn(job, workhash):
     env = os.environ
     env['SAMC_JOB'] = job
     env['WORKHASH'] = workhash
-    spec = 'python py/experiment.py'
+    spec = 'python samcnet/experiment.py'
     return sb.Popen(spec.split(), env=env)
     #return sb.Popen(spec.split(), env=env, stdout=null)
 

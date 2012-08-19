@@ -1,3 +1,6 @@
 build
 .waf*
 .lock*
+*.pyc
+cde.options
+cde-package
