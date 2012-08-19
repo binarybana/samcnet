@@ -11,6 +11,7 @@ def plotHist(s):
     rows = 3
     cols = 2
 
+    p.figure()
     p.subplot(rows, cols, 1)
     p.plot(s.hist[0], s.hist[1], 'k.')
     p.title("Region's theta values")
@@ -59,6 +60,23 @@ def plotHist(s):
     p.hist(part, weights=part, bins=50)
     p.xlabel('exp(theta - theta_max)')
     p.ylabel('Amount of weight at this value')
+
+def plotScatter(s):
+    if type(s.db) == list:
+        energies = np.fromiter((x['energy'] for x in s.db), 
+            count=len(s.db), 
+            dtype=np.float)
+        thetas = np.fromiter((x['theta'] for x in s.db), 
+            count=len(s.db), 
+            dtype=np.float)
+    else:
+        thetas = s.db.root.samples[:]['theta']
+        energies = s.db.root.samples[:]['energy']
+
+    p.figure()
+    p.plot(energies, thetas, 'k.', alpha=0.7)
+    p.xlabel('Energy')
+    p.ylabel('Theta')
 
 def drawGraph(graph, show=False):
     fname = os.tempnam()

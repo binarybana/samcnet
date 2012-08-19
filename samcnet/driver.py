@@ -123,7 +123,3 @@ while True:
         newchildren = [spawn(job, workhash) for x in range(grab)]
         children.extend(newchildren)
         
-
-
-
-

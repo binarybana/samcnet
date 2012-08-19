@@ -46,8 +46,37 @@ def generateHourGlassGraph(nodes=10, interconnects = 0):
         x.add_edge(firstnode,secondnode)
     return x
 
+def noisylogic(s,p):
+    """
+    Generate a dictionary where each value is the cumulative distribution of 
+    the categorical random variable given the parents configuration as the key.
 
-def generateData(graph, numPoints=50, noise=0.5, cpds=None):
+    In this case, we want to pick a random logic function, and then return that.
+
+    Assuming binary valued nodes for now.
+    """
+    numparents = int(np.log2(p))
+    if numparents == 0:
+        if np.random.rand() < 0.5:
+            cpd = lambda: np.array([np.random.randint(0,2), 1.0])
+        else:
+            cpd = lambda: np.array([0.5, 1.0])
+    else:
+        cpd = lambda: np.array([np.random.randint(0,2), 1.0])
+    return defaultdict(cpd)
+
+def dirichlet(s, p):
+    """
+    Generate a dictionary where each value is the cumulative distribution of 
+    the categorical random variable given the parents configuration as the key.
+
+    In this case, we will use a random distribution for each state of the 
+    parents variables.
+    """
+    cpd = lambda states: np.cumsum(np.random.dirichlet([1./states]*states))
+    return defaultdict(partial(cpd,s))
+
+def generateData(graph, numPoints=50, noise=0.5, cpds=None, method='dirichlet'):
     """ 
     Generate <numPoints> random draws from graph, with 
     randomly assigned CPDs and additive zero mean Gaussian 
@@ -62,13 +91,16 @@ def generateData(graph, numPoints=50, noise=0.5, cpds=None):
 
     if not cpds:
         numparents = adj.sum(axis=0)
-        #states = np.ones((numnodes,)) * 2 # assuming 2 states per node
         states = np.random.randint(2,3, size=numnodes)
         numparentstates = (states ** numparents)
-        def cpdGen(states, parstates):
-            return np.cumsum(np.random.dirichlet([1./states]*states))
-        cpds = [defaultdict(partial(cpdGen,s,p)) \
-                for s,p in zip(states,numparentstates)]
+        if method == 'dirichlet':
+            func = dirichlet
+        elif method == 'noisylogic':
+            assert np.all(states == 2) # we can generalize this later
+            func = noisylogic
+
+        cpds = [func(s,p) \
+            for s,p in zip(states,numparentstates)]
     
     draws = np.empty((numPoints, numnodes), dtype=np.int)
     for i in range(numPoints):
