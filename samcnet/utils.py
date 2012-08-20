@@ -24,25 +24,14 @@ def plotHist(s):
     p.ylabel('Count')
     p.xlabel('Energy')
 
-    if type(s.db) == list:
-        energies = np.fromiter((x['energy'] for x in s.db), 
-            count=len(s.db), 
-            dtype=np.float)
-    else:
-        energies = s.db.root.samples[:]['energy']
+    energies = s.db['energies']
+    thetas = s.db['thetas']
 
     p.subplot(rows, cols, 3)
     p.plot(np.arange(s.burn, energies.shape[0]+s.burn), energies, 'k.')
     p.title("Energy Trace")
     p.ylabel('Energy')
     p.xlabel('Iteration')
-
-    if type(s.db) == list:
-        thetas = np.fromiter((x['theta'] for x in s.db), 
-            count=len(s.db), 
-            dtype=np.float)
-    else:
-        thetas = s.db.root.samples[:]['theta']
 
     p.subplot(rows, cols, 4)
     p.plot(np.arange(s.burn, thetas.shape[0]+s.burn), thetas, 'k.')
@@ -62,16 +51,8 @@ def plotHist(s):
     p.ylabel('Amount of weight at this value')
 
 def plotScatter(s):
-    if type(s.db) == list:
-        energies = np.fromiter((x['energy'] for x in s.db), 
-            count=len(s.db), 
-            dtype=np.float)
-        thetas = np.fromiter((x['theta'] for x in s.db), 
-            count=len(s.db), 
-            dtype=np.float)
-    else:
-        thetas = s.db.root.samples[:]['theta']
-        energies = s.db.root.samples[:]['energy']
+    energies = s.db['energies']
+    thetas = s.db['thetas']
 
     p.figure()
     p.plot(energies, thetas, 'k.', alpha=0.7)

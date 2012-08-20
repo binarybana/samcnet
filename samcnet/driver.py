@@ -3,12 +3,14 @@ import redis
 import sha
 import atexit
 import subprocess as sb
-import logging
-import logging.handlers
+from time import time, sleep
+import traceback
 try:
     import simplejson as js
 except:
     import json as js
+import logging
+import logging.handlers
 
 h = logging.handlers.SysLogHandler(('knight-server.dyndns.org',10514))
 h.setLevel(logging.DEBUG)
@@ -18,9 +20,13 @@ logger = logging.getLogger()
 logger.addHandler(h)
 logger.setLevel(logging.DEBUG)
 
+def log_uncaught_exceptions(ex_cls, ex, tb):
+    logger.critical(''.join(traceback.format_tb(tb)))
+    logger.critical('{0}: {1}'.format(ex_cls, ex))
 
-from time import time, sleep
+sys.excepthook = log_uncaught_exceptions
 
+logger.info('Connecting to db.')
 r = redis.StrictRedis('knight-server.dyndns.org')
 
 def getHost():
@@ -38,7 +44,6 @@ def spawn(job, workhash):
     env['WORKHASH'] = workhash
     spec = 'python samcnet/experiment.py'
     return sb.Popen(spec.split(), env=env)
-    #return sb.Popen(spec.split(), env=env, stdout=null)
 
 def kill(spawn):
     if spawn == None:
@@ -56,7 +61,6 @@ if sys.argv[1] == 'rebuild':
     logger.info('Beginning dummy run for CDE rebuild')
     capacity = 1
     children = [None] * capacity
-    null = open('/dev/null','a')
     cmd = r.get('die')
     if getHost() == 'dummy':
         x = 2
@@ -66,6 +70,7 @@ if sys.argv[1] == 'rebuild':
             numdata=50, 
             priorweight=10, 
             burn=0,
+            data_method='dirichlet',
             numtemplate=5)
     test = js.dumps(test)
     x = spawn(test, sha.sha(test).hexdigest())
@@ -75,14 +80,16 @@ if sys.argv[1] == 'rebuild':
 else:
     capacity = int(sys.argv[1])
     children = [None] * capacity
-    null = open('/dev/null','a')
+    if r.zscore('clients-hb', getHost()):
+        logger.warning('It appears there already exists a HB client on '+\
+                'this host, shutting down')
+        sys.exit()
 
-logger.info('Connecting to db.')
 while True:
     r.zadd('clients-hb', r.time()[0], getHost())
     cmd = r.get('die')
     if cmd == 'all' or cmd == getHost():
-        logging.info("Received die command, shutting down.")
+        logger.info("Received die command, shutting down.")
         for x in children:
             kill(x)
         r.zrem('clients-hb', getHost())
@@ -98,28 +105,36 @@ while True:
     workhash = None
     if freenum > 0:
         with r.pipeline(transaction=True) as pipe:
-            queue = r.hgetall('desired-samples')
-            for h,num in queue.iteritems():
-                if int(num) > 0:
-                    logging.info("Found %s samples left on hash %s" % (num, h))
-                    workhash = h
+            while True:
+                try:
+                    workhash = None
+                    pipe.watch('desired-samples')
+                    queue = pipe.hgetall('desired-samples')
+                    for h,num in queue.iteritems():
+                        if int(num) > 0:
+                            logger.info("Found %s samples left on hash %s" % (num, h))
+                            workhash = h
+                            break
+                    if workhash != None:
+                        # We found some work!
+                        grab = freenum if freenum < int(num) else int(num)
+                        logger.debug('Freenum: %d, desirednum: %d, grab: %d', freenum, int(num), grab)
+                        pipe.multi()
+                        pipe.hincrby('desired-samples', workhash, -1*grab)
+                        pipe.execute()
                     break
-            if workhash != None:
-                # We found some work!
-                #grab = freenum if freenum < num else num
-                if freenum < num:
-                    grab = freenum
-                else:
-                    grab = num
-                r.hincrby('desired-samples', workhash, -1*grab)
+                except redis.WatchError:
+                    continue
+            pipe.unwatch()
+
 
     if workhash == None:
-        logging.debug('sleeping for 2 seconds...')
+        logger.debug('sleeping for 2 seconds...')
         sleep(2)
         continue
     else:
         job = r.hget('configs', workhash)
-        logging.info('Spawning %d new children', grab)
+        logger.info('Spawning %d new children', grab)
         newchildren = [spawn(job, workhash) for x in range(grab)]
         children.extend(newchildren)
         

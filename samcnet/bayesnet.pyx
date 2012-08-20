@@ -17,13 +17,13 @@ cdef class BayesNet:
     cdef public:
         object nodes,states,data,graph,x,mat,fvalue,changelist,table
         object oldmat, oldx, oldfvalue
-        object template
+        object template, ntemplate, groundgraph, ngroundgraph
         int limparent, data_num, node_num, changelength, lastscheme
         double prior_alpha, prior_gamma
     cdef:
         int **cmat, **cdata
         double **ctemplate
-    def __init__(self, nodes, states, data, template=None, priorweight=1.0):
+    def __init__(self, nodes, states, data, groundgraph=None, template=None, priorweight=1.0):
         """
         nodes: a list of strings for the nodes
         states: a list of number of states for each node
@@ -46,14 +46,22 @@ cdef class BayesNet:
         self.data_num = data.shape[0]
         self.node_num = data.shape[1]
 
+        # Template and Ground truth networks
         if template == None:
-            self.template = np.zeros((self.node_num, self.node_num), dtype=np.double)
+            self.template = None
+            self.ntemplate = np.zeros((self.node_num, self.node_num), dtype=np.double)
         else:
-            self.template = np.asarray(template.copy(), dtype=np.double)
-            #self.template = np.asarray(nx.to_numpy_matrix(template.copy()), dtype=np.double) 
+            self.template = template.copy()
+            self.ntemplate = np.asarray(nx.to_numpy_matrix(template), dtype=np.double)
+        np.fill_diagonal(self.ntemplate, 1.0) 
+        self.ctemplate = npy2c_double(self.ntemplate)
 
-        np.fill_diagonal(self.template, 1.0) 
-        self.ctemplate = npy2c_double(self.template)
+        if groundgraph == None:
+            self.groundgraph, self.ngroundgraph = None, None
+        else:
+            self.groundgraph = groundgraph
+            self.ngroundgraph = np.asarray(nx.to_numpy_matrix(groundgraph))
+            np.fill_diagonal(self.ngroundgraph, 1.0)
 
         self.x = np.arange(self.node_num, dtype=np.int32)
         np.random.shuffle(self.x) # We're going to make this a 0-9 permutation
@@ -81,37 +89,29 @@ cdef class BayesNet:
         #"""
         #pass
 
-    def init_db(self, db):
-        if '/samples' in db:
-            self.table = db.getNode('/samples')
-            if len(db.root.samples) > 0:
-                self.mat = db.root.samples[-1]['matrix']
-                self.cmat = npy2c_int(self.mat)
-                self.x = db.root.samples[-1]['x']
-                self.changelength = self.node_num
-                self.changelist = self.x.copy()
+    def init_db(self, db, size):
+        dtype = [('thetas',np.double),
+                 ('energies',np.double),
+                 ('funcs',np.double)]
+        if db == None:
+            return np.zeros(size, dtype=dtype)
+        elif db.shape[0] != size:
+            return np.resize(size)
         else:
-            dtype = {'matrix': tb.IntCol(shape=(self.node_num, self.node_num)),
-                    'x': tb.IntCol(shape=(self.node_num,)),
-                    'energy': tb.Float64Col(),
-                    'theta': tb.Float64Col(),
-                    'region': tb.IntCol()}
-            self.table = db.createTable('/', 'samples', description=dtype)
+            raise Exception("DB not initialized!")
 
-    def save_to_db(self, db, energy, theta, region):
-        if type(db) == list:
-            db.append({'matrix': self.mat,
-                'x': self.x,
-                'energy': energy,
-                'theta' : theta,
-                'region': region})
+    def global_edge_presence(self):
+        if self.ngroundgraph == None:
+            return np.nan
         else:
-            self.table.row['matrix'] = self.mat#[s].T[s].T
-            self.table.row['energy'] = energy
-            self.table.row['theta'] = theta
-            self.table.row['region'] = region
-            self.table.row['x'] = self.x
-            self.table.row.append()
+            s = self.x.argsort()
+            ordmat = self.mat[s].T[s].T
+            return np.abs(self.ngroundgraph - ordmat).sum() / self.x.shape[0]**2
+
+    def save_to_db(self, db, theta, energy, i):
+        func = self.global_edge_presence()
+        assert db is not None, 'DB None when trying to save sample.'
+        db[i] = np.array([theta, energy, func])
 
     def update_graph(self, matx=None):
         """
@@ -145,7 +145,7 @@ cdef class BayesNet:
         From a networkx graph, update the internal representation of the graph
         (an adjacency matrix and node list).
 
-        Also see self.update_graph.
+        Also see self.update_graph
         """
         assert graph.number_of_nodes() == self.node_num
         mat = np.array(nx.to_numpy_matrix(graph),dtype=np.int32)

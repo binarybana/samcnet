@@ -55,14 +55,15 @@ def noisylogic(s,p):
 
     Assuming binary valued nodes for now.
     """
+    eps = 0.1
     numparents = int(np.log2(p))
     if numparents == 0:
         if np.random.rand() < 0.5:
-            cpd = lambda: np.array([np.random.randint(0,2), 1.0])
+            cpd = lambda: np.array([ra.choice([0+eps, 1-eps]), 1.0])
         else:
             cpd = lambda: np.array([0.5, 1.0])
     else:
-        cpd = lambda: np.array([np.random.randint(0,2), 1.0])
+        cpd = lambda: np.array([ra.choice([0+eps, 1-eps]), 1.0])
     return defaultdict(cpd)
 
 def dirichlet(s, p):
@@ -76,23 +77,23 @@ def dirichlet(s, p):
     cpd = lambda states: np.cumsum(np.random.dirichlet([1./states]*states))
     return defaultdict(partial(cpd,s))
 
-def generateData(graph, numPoints=50, noise=0.5, cpds=None, method='dirichlet'):
+def generateData(graph, numPoints=50, noise=0.0, cpds=None, method='dirichlet'):
     """ 
     Generate <numPoints> random draws from graph, with 
     randomly assigned CPDs and additive zero mean Gaussian 
     noise with std_dev=noise on the observations.
 
-    TODO: add noise
     """
     
     order = nx.topological_sort(graph)
     numnodes = graph.number_of_nodes()
     adj = np.array(nx.to_numpy_matrix(graph),dtype=np.int)
+    states = np.ones(numnodes)*2
 
     if not cpds:
         numparents = adj.sum(axis=0)
-        states = np.random.randint(2,3, size=numnodes)
         numparentstates = (states ** numparents)
+        #states = np.random.randint(2,3, size=numnodes)
         if method == 'dirichlet':
             func = dirichlet
         elif method == 'noisylogic':
@@ -107,7 +108,10 @@ def generateData(graph, numPoints=50, noise=0.5, cpds=None, method='dirichlet'):
         for node in order:
             parents = adj[:,node]
             parstate = tuple(draws[i,parents==1])
-            draws[i,node] = np.searchsorted(cpds[node][parstate], np.random.random())
+            if np.random.rand() < noise:
+                draws[i,node] = np.random.randint(0, states[node])
+            else:
+                draws[i,node] = np.searchsorted(cpds[node][parstate], np.random.random())
 
     return draws, states, cpds
 

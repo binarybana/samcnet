@@ -2,11 +2,7 @@
 import os, sys, shlex, time, sha
 import subprocess as sb
 import redis
-import random
-try:
-    import simplejson as js
-except:
-    import json as js
+import simplejson as js
 from samcnet.server_configs import serverconfigs, syncgroups, cesg_small, cesg_large, gsp_compute
 
 LocalRoot = '/home/bana/GSP/research/samc/code'
@@ -16,15 +12,16 @@ def launchClient(host):
     if host.cde:
         spec = ('ssh {0.hostname} cd {0.root}/cde-package/cde-root/' \
                 + 'home/bana/GSP/research/samc/code; ').format(host) \
-                + ('{0.python} samcnet/driver.py {1} &'.format(host,cores))
+                + ('nohup {0.python} samcnet/driver.py {1} >/dev/null 2>&1 &'.format(host,cores))
     else:
-        spec = ('ssh {0.hostname} cd {0.root};'.format(host) \
-                + ('LD_LIBRARY_PATH=./build:$LD_LIBRARY_PATH {0.python} samcnet/driver.py {1} &'.format(host,cores)))
+        spec = ('ssh {0.hostname} cd {0.root};' + \
+                'LD_LIBRARY_PATH=./build:$LD_LIBRARY_PATH nohup {0.python} '+ \
+                'samcnet/driver.py {1} >/dev/null 2>&1 &').format(host,cores)
 
     print "Connecting to %s." % host.hostname
-    sb.Popen(shlex.split(spec), 
-            bufsize=-1,
-            stdout=open('/tmp/samc-{0.hostname}-{1}.log'.format(host, random.randint(0,1e9)) ,'w'))
+    p = sb.Popen(shlex.split(spec), 
+            bufsize=-1)
+            #stdout=open('/tmp/samc-{0.hostname}-{1}.log'.format(host, random.randint(0,1e9)) ,'w'))
     return 
 
 def manualKill(host):
@@ -76,7 +73,10 @@ def postJob(job, samples):
     print("Added %d samples for a total of %d samples remaining." % (samples,tot))
     print("Pushed job:" )
     for k,v in job.iteritems():
-        print '\t'+k+':\t'+str(v)
+        if k == 'graph':
+            print '\t'+k+':\t'+str(hash(v))
+        else:
+            print '\t'+k+':\t'+str(v)
 
 def postSweep(base, iters, param, values):
     """ 
@@ -90,6 +90,7 @@ def postSweep(base, iters, param, values):
     r.hsetnx('sweep-configs', sweephash, sweepconfig)
     for v in values:
         base[param] = v
+        r.hsetnx('sweep-'+sweephash, v, sha.sha(js.dumps(base)).hexdigest())
         postJob(base, iters)
 
 def kill(target):
@@ -103,7 +104,7 @@ def kill(target):
         if target == 'all':
             return r.zcard('clients-hb')
         else:
-            clients = r.sort('clients-hb')
+            clients = r.sort('clients-hb', by='nosort')
             return len([x for x in clients if x == target])
 
     num = countTargets(target)
@@ -151,20 +152,36 @@ if __name__ == '__main__':
 
     elif goal == 'launchgroup':
         #for host in cesg_small:
-        #for host in gsp_compute + 'toxic sequencer bana-desktop'.split():
-        for host in gsp_compute + cesg_small + 'raptor toxic sequencer bana-desktop'.split():
+        #for host in gsp_compute + 'toxic sequenceanalyze bana-desktop'.split():
+        for host in gsp_compute + cesg_small + 'raptor blackbird compute-0-5 camdi16 toxic sequenceanalyze bana-desktop'.split():
             cfg = serverconfigs[host]
-            time.sleep(0.2)
             launchClient(cfg)
 
     elif goal == 'postdummy':
-        test = dict(
-            nodes = 5,
+        from samcnet.utils import drawGraphs
+        import networkx as nx
+        import numpy as np
+        from samcnet.generator import generateHourGlassGraph
+        g = generateHourGlassGraph(15, 2)
+        drawGraphs(g)
+        base = dict(
+            nodes = 15,
             samc_iters=1e4,
-            numdata=50,
-            priorweight=10,
-            numtemplate=5)
-        postJob(test, samples=24)
+            numdata=200,
+            priorweight=5,
+            experiment_type='difference',
+            gen_method = 'noisylogic',
+            graph = np.array(nx.to_numpy_matrix(g),dtype=np.int32).tostring(),
+            seed = 12341234,
+            note = 'Fixed graph, small priorweight.',
+            numtemplate=15)
+        #test = dict(
+            #nodes = 5,
+            #samc_iters=1e4,
+            #numdata=50,
+            #priorweight=10,
+            #numtemplate=5)
+        postJob(base, samples=1)
 
     elif goal == 'post':
         test = dict(
@@ -176,20 +193,34 @@ if __name__ == '__main__':
         postJob(test, samples=20)
 
     elif goal == 'postsweep':
+        from samcnet.utils import drawGraphs
+        import networkx as nx
+        import numpy as np
+        from samcnet.generator import generateHourGlassGraph
+        cont = 'n'
+        while cont != 'y':
+            g = generateHourGlassGraph(40, 3)
+            drawGraphs(g)
+            cont = raw_input('Is this graph okay? (y/n): ')
         base = dict(
-            nodes = 15,
+            nodes = 40,
             samc_iters=5e5,
-            numdata=10,
-            priorweight=500,
-            numtemplate=15)
-        postSweep(base, 180, 'numdata', [20, 500])
-
+            numdata='sweep',
+            priorweight=40,
+            experiment_type='difference',
+            gen_method = 'noisylogic',
+            graph = np.array(nx.to_numpy_matrix(g),dtype=np.int32).tostring(),
+            seed = 12341234,
+            noise = 0.05,
+            note = 'latenight - one more swing at sweeping across numdata, this time with a fixed graph.',
+            numtemplate=30)
+        postSweep(base, 200, 'numtemplate', [20,50,100,200,500])
 
     elif goal == 'killall':
         kill('all')
 
     elif goal == 'killall9':
-        for host in gsp_compute + cesg_small + 'kubera raptor toxic sequencer'.split():
+        for host in gsp_compute + cesg_small + 'kubera raptor toxic sequenceanalyze'.split():
             cfg = serverconfigs[host]
             time.sleep(0.2)
             manualKill(cfg)
@@ -207,9 +238,13 @@ if __name__ == '__main__':
         else:
             print("The %d clients alive are:" % num)
             curr_time = r.time()
+            cores = 0
             for x in clients:
                 print '\t%s with hb %3.1f seconds ago' \
                         % (x, curr_time[0] + (curr_time[1]*1e-6) - int(r.zscore('clients-hb',x)))
+                cores += serverconfigs[x].cores
+
+            print("Cores active: %d" % cores)
         print("The job list is currently:")
         joblist = r.hgetall('desired-samples')
         for i,x in joblist.iteritems():
