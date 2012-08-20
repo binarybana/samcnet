@@ -104,12 +104,14 @@ cdef class SAMCRun:
         return numerator / denom
 
     cdef find_region(self, energy):
+        cdef int i
         if energy > self.highEnergy: 
             return self.grid-1
         elif energy < self.lowEnergy:
             return 0
         else: 
-            return floor((energy-self.lowEnergy)*self.scale)
+            i = <int> floor((energy-self.lowEnergy)*self.scale)
+            return i if i<self.grid else self.grid-1
 
     #@cython.boundscheck(False) # turn off bounds-checking for entire function
     def sample(self, iters, thin=1):
