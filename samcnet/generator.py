@@ -77,9 +77,9 @@ def dirichlet(s, p):
     cpd = lambda states: np.cumsum(np.random.dirichlet([1./states]*states))
     return defaultdict(partial(cpd,s))
 
-def generateData(graph, numPoints=50, noise=0.0, cpds=None, method='dirichlet'):
+def generateData(graph, numpoints=50, noise=0.0, cpds=None, method='dirichlet'):
     """ 
-    Generate <numPoints> random draws from graph, with 
+    Generate <numpoints> random draws from graph, with 
     randomly assigned CPDs and additive zero mean Gaussian 
     noise with std_dev=noise on the observations.
 
@@ -103,8 +103,8 @@ def generateData(graph, numPoints=50, noise=0.0, cpds=None, method='dirichlet'):
         cpds = [func(s,p) \
             for s,p in zip(states,numparentstates)]
     
-    draws = np.empty((numPoints, numnodes), dtype=np.int)
-    for i in range(numPoints):
+    draws = np.empty((numpoints, numnodes), dtype=np.int)
+    for i in range(numpoints):
         for node in order:
             parents = adj[:,node]
             parstate = tuple(draws[i,parents==1])

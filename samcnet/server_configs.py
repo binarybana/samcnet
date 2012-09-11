@@ -17,7 +17,7 @@ for x in cesg_small:
       '/home/bana',  
       '/home/bana/cde-package/cde-exec python', 
       True,
-      8)
+      7)
 
 cesg_large = 'raptor blackbird hornet'.split()
 cores = [20,25,20]

@@ -85,6 +85,9 @@ def postSweep(base, iters, param, values):
     """
     assert param in base
     base[param] = 'sweep'
+    for k,v in base.iteritems():
+        if k != param and v == 'sweep':
+            raise Exception('Improper configuration specification.')
     sweepconfig = js.dumps(base)
     sweephash = sha.sha(sweepconfig).hexdigest()
     r.hsetnx('sweep-configs', sweephash, sweepconfig)
@@ -200,21 +203,29 @@ if __name__ == '__main__':
         cont = 'n'
         while cont != 'y':
             g = generateHourGlassGraph(40, 3)
-            drawGraphs(g)
-            cont = raw_input('Is this graph okay? (y/n): ')
+            #drawGraphs(g)
+            cont = 'y'#raw_input('Is this graph okay? (y/n): ')
         base = dict(
-            nodes = 40,
-            samc_iters=5e5,
-            numdata='sweep',
-            priorweight=40,
-            experiment_type='difference',
+            nodes = 50,
+            samc_iters='sweep',
+            numdata=0,
+            priorweight=100,
+            experiment_type='single',
             gen_method = 'noisylogic',
             graph = np.array(nx.to_numpy_matrix(g),dtype=np.int32).tostring(),
             seed = 12341234,
             noise = 0.05,
-            note = 'latenight - one more swing at sweeping across numdata, this time with a fixed graph.',
-            numtemplate=30)
-        postSweep(base, 200, 'numtemplate', [20,50,100,200,500])
+            note = '3: No data, just templates, how long?',
+            numtemplate=100)
+        postSweep(base, 50, 'samc_iters', [1e5, 2.5e5, 5e5, 1e6, 2e6])
+
+    elif goal == 'cleanjobs':
+        joblist = r.hgetall('desired-samples')
+        for h,des in joblist.iteritems():
+            if not r.exists(h) or r.llen(h) < 45:
+                print 'Deleting hash: %s' % h
+                r.delete(h)
+                r.hdel('desired-samples', h)
 
     elif goal == 'killall':
         kill('all')

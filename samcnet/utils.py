@@ -3,7 +3,7 @@ import os
 import networkx as nx
 import numpy as np
 import pandas as pa
-import pebl as pb
+#import pebl as pb
 import StringIO as si
 import tempfile
 

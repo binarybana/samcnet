@@ -61,7 +61,7 @@ def sample(states, data, graph, template=None, iters=1e4, priorweight=1.0, burn=
     print("SAMC run took %f seconds." % (t2-t1))
     return b,s
 
-def estimateMean(samc, graph):
+def estimateMean(samc):
     t2 = time()
     func_mean = samc.estimate_func_mean()
     t3 = time()
@@ -139,37 +139,51 @@ elif __name__ == '__main__':
 
     if True:
         N = 15
-        iters = 1e5
-        numdata = 400
+        iters = 5e5
+        numdata = 100
         priorweight = 5
-        numtemplate = 15
+        numtemplate = 5
         
-        random.seed(1234567)
-        np.random.seed(1234567)
+        random.seed(3234567)
+        np.random.seed(3234567)
 
-        graph = generateHourGlassGraph(nodes=N)
-        data, states, cpds = generateData(graph,numdata)
-        logicdata, logicstates, logiccpds = generateData(graph,numdata,method='noisylogic')
+        g1 = generateHourGlassGraph(nodes=N)
+        g2 = generateHourGlassGraph(nodes=N)
+        #g3 = generateHourGlassGraph(nodes=N)
 
-        template = sampleTemplate(graph, numtemplate)
+        d1, states1, cpds1 = generateData(g1,numdata,method='noisylogic')
+        d2, states2, cpds2 = generateData(g2,numdata,method='noisylogic')
+        #d3, states3, cpds3 = generateData(g3,numdata,method='noisylogic')
 
-        b,s   = sample(logicstates, logicdata[:200], graph, template=template, 
+        t1 = sampleTemplate(g1, numtemplate)
+        t2 = sampleTemplate(g2, numtemplate)
+
+        graphcombo = g1.copy()
+        graphcombo.add_edges_from(g2.edges())
+        templatecombo = t1.copy()
+        templatecombo.add_edges_from(t2.edges())
+
+        #drawGraphs(g1,g2,t1,t2,graphcombo,templatecombo)
+        b,s   = sample(states1, np.r_[d1,d2], graphcombo, template=templatecombo, 
                 iters=iters, priorweight=priorweight, burn=0, stepscale=40000)
 
-        b2,s2 = sample(logicstates, logicdata[200:], graph, template=template, 
-                iters=iters, priorweight=priorweight, burn=0, stepscale=40000)
+        #b2,s2 = sample(logicstates, logicdata[200:], graph, template=template, 
+                #iters=iters, priorweight=priorweight, burn=0, stepscale=40000)
 
-        mean1 = estimateMean(s,graph)
-        mean2 = estimateMean(s2,graph)
+        mean1 = estimateMean(s)
+        #mean2 = estimateMean(s2)
 
-        print "##### wotemp - wtemp = %f - %f = %f #######" % (mean1, mean2, mean1-mean2)
-        print "Effective sample size: %d" % len(set(map(tuple,logicdata)))
+        #print "##### wotemp - wtemp = %f - %f = %f #######" % (mean1, mean2, mean1-mean2)
+        #print "Effective sample size: %d" % len(set(map(tuple,logicdata)))
 
         b.update_graph(s.mapvalue)
-        b2.update_graph(s2.mapvalue)
-        drawGraphs(graph, template, b.graph, b2.graph)
+        #b2.update_graph(s2.mapvalue)
+        drawGraphs(g1, g2, t1, t2, b.graph)
 
         val1 = b.global_edge_presence()
-        val2 = b2.global_edge_presence()
+        #val2 = b2.global_edge_presence()
+
+        print('Global edge error: %f' % mean1)
+        print('Map edge error: %f' % val1)
 
 
