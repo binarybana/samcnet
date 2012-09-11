@@ -23,7 +23,7 @@ cdef class BayesNet:
     cdef:
         int **cmat, **cdata
         double **ctemplate
-    def __init__(self, nodes, states, data, groundgraph=None, template=None, priorweight=1.0):
+    def __init__(self, nodes, states, data, template=None, priorweight=1.0):
         """
         nodes: a list of strings for the nodes
         states: a list of number of states for each node
@@ -55,13 +55,6 @@ cdef class BayesNet:
             self.ntemplate = np.asarray(nx.to_numpy_matrix(template), dtype=np.double)
         np.fill_diagonal(self.ntemplate, 1.0) 
         self.ctemplate = npy2c_double(self.ntemplate)
-
-        if groundgraph == None:
-            self.groundgraph, self.ngroundgraph = None, None
-        else:
-            self.groundgraph = groundgraph
-            self.ngroundgraph = np.asarray(nx.to_numpy_matrix(groundgraph))
-            np.fill_diagonal(self.ngroundgraph, 1.0)
 
         self.x = np.arange(self.node_num, dtype=np.int32)
         np.random.shuffle(self.x) # We're going to make this a 0-9 permutation
@@ -100,16 +93,16 @@ cdef class BayesNet:
         else:
             raise Exception("DB not initialized!")
 
-    def global_edge_presence(self):
-        if self.ngroundgraph == None:
+    def global_edge_presence(self, ground_truth=None):
+        if ground_truth == None:
             return np.nan
         else:
             s = self.x.argsort()
             ordmat = self.mat[s].T[s].T
-            return np.abs(self.ngroundgraph - ordmat).sum() / self.x.shape[0]**2
+            return np.abs(ground_truth - ordmat).sum() / self.x.shape[0]**2
 
-    def save_to_db(self, db, theta, energy, i):
-        func = self.global_edge_presence()
+    def save_to_db(self, db, theta, energy, i, ground_truth=None):
+        func = self.global_edge_presence(ground_truth)
         assert db is not None, 'DB None when trying to save sample.'
         db[i] = np.array([theta, energy, func])
 
