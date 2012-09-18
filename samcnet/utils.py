@@ -7,6 +7,9 @@ import pandas as pa
 import StringIO as si
 import tempfile
 
+def getHost():
+    return os.uname()[1].split('.')[0]
+
 def plotHist(s):
     rows = 3
     cols = 2
@@ -93,6 +96,14 @@ def drawGraphs(*args, **kwargs):
 
     for f in files:
         os.unlink(f[1])
+
+def best_to_graph(mapvalue):
+    mat = mapvalue[0]
+    x = mapvalue[1]
+    s = x.argsort()
+    mat = mat[s].T[s].T
+    np.fill_diagonal(mat, 0)
+    return nx.from_numpy_matrix(mat)
 
 def to_pebl(states, data):
     header = ['%d,discrete(%d)' %(i,a) for i,a in enumerate(states)]

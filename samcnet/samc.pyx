@@ -1,3 +1,4 @@
+# cython: profile=False
 cimport cython
 from libc.math cimport exp, ceil, floor
 
@@ -10,10 +11,10 @@ cimport numpy as np
 
 cdef class SAMCRun:
     cdef public:
-        object obj, db, refden, hist, indicator, mapvalue
+        object obj, db, refden, hist, indicator, mapvalue, ground
         int lowEnergy, highEnergy, scale, grid, accept_loc, total_loc, iteration, burn, stepscale
         double rho, tau, mapenergy, delta,
-    def __init__(self, obj, burn=100000, stepscale = 10000):
+    def __init__(self, obj, ground=None, burn=100000, stepscale = 10000):
 
         self.obj = obj # Going to be a BayesNet for now, but we'll keep it general
         self.clear()
@@ -26,6 +27,8 @@ cdef class SAMCRun:
 
         self.burn = burn
         self.stepscale = stepscale
+
+        self.ground = ground
 
     def set_energy_limits(self):
         cdef int i
@@ -68,9 +71,9 @@ cdef class SAMCRun:
         self.highEnergy = <int>high
         self.grid = <int>ceil((self.highEnergy - self.lowEnergy) * self.scale)
 
-        self.refden = np.arange(self.grid, 0, -1, dtype=np.double)
-        self.refden = self.refden**2
-        #self.refden = np.ones(self.grid, dtype=np.double)
+        #self.refden = np.arange(self.grid, 0, -1, dtype=np.double)
+        #self.refden = self.refden**2
+        self.refden = np.ones(self.grid, dtype=np.double)
 
         self.refden /= self.refden.sum()
         self.hist = np.zeros((3,self.grid), dtype=np.double)
@@ -87,7 +90,7 @@ cdef class SAMCRun:
         self.accept_loc = 0
         self.total_loc = 0
 
-    def estimate_func_mean(self):
+    def estimate_func_mean(self, trunc=None):
         """ 
         Using the function of interest in the object, estimate the mean of the function
         on the random weighted samples.
@@ -96,11 +99,19 @@ cdef class SAMCRun:
         thetas = self.db['thetas']
         assert thetas.shape[0] != 0
 
+        if trunc:
+            num = len(self.db)/trunc
+            grab = thetas.argsort()[::-1][num:]
+            thetas = thetas[grab]
+
         part = np.exp(thetas - thetas.max())
 
-        numerator = (part * self.db['funcs']).sum()
+        if trunc:
+            numerator = (part * self.db['funcs'][grab]).sum()
+        else:
+            numerator = (part * self.db['funcs']).sum()
         denom = part.sum()
-        print "Calculating function mean: %g / %g." % (numerator, denom)
+        print "Calculating function mean: %g / %g = %g." % (numerator, denom, numerator/denom)
         return numerator / denom
 
     cdef find_region(self, energy):
@@ -115,7 +126,7 @@ cdef class SAMCRun:
 
     #@cython.boundscheck(False) # turn off bounds-checking for entire function
     def sample(self, iters, thin=1):
-        cdef int current_iter, accept, oldregion, newregion, i, nonempty
+        cdef int current_iter, accept, oldregion, newregion, i, nonempty, dbsize
         cdef double oldenergy, newenergy, r, un
         cdef np.ndarray[np.int32_t, ndim=1, mode="c"] indicator = \
                 self.indicator
@@ -129,7 +140,10 @@ cdef class SAMCRun:
         oldregion = self.find_region(oldenergy) # AKA nonempty
         indicator[oldregion] = 1
 
-        self.db = self.obj.init_db(self.db, self.iteration + int(iters) - self.burn)
+        dbsize = self.iteration + int(iters) - self.burn
+        if dbsize < 0:
+            dbsize = 0
+        self.db = self.obj.init_db(self.db, dbsize)
         print("Initial Energy: %g" % oldenergy)
         #fid = open("rlogpy2",'w')
 
@@ -152,6 +166,7 @@ cdef class SAMCRun:
             indicator[newregion] = 1
 
             r = hist[oldregion] - hist[newregion] + (oldenergy-newenergy) #/self.temperature
+            #print hist[oldregion] - hist[newregion], (oldenergy-newenergy)
             
             #fid.write("%f,%f,%f,%f,%f,%f\n" % (hist[oldregion], hist[newregion], oldenergy,
                 #newenergy, r, self.obj.lastscheme))
@@ -180,7 +195,11 @@ cdef class SAMCRun:
             locfreq[oldregion] -= 1
 
             if current_iter >= self.burn:
-                self.obj.save_to_db(self.db, hist[oldregion], oldenergy, current_iter-self.burn)
+                self.obj.save_to_db(self.db, 
+                        hist[oldregion], 
+                        oldenergy, 
+                        current_iter-self.burn, 
+                        self.ground)
 
             if self.iteration % 10000 == 0:
                 print("Iteration: %8d, delta: %5.2f, best energy: %7g, current energy: %7g" % \

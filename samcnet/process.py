@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pa
 import pylab as p
 import simplejson as js
+import sha
 
 r = redis.StrictRedis()
 
@@ -14,6 +15,7 @@ r = redis.StrictRedis()
 count = 0
 valid_selections = []
 sweeps = zip(range(10000), r.hgetall('sweep-configs').iteritems())
+#sweeps = zip(range(10000), r.hgetall('configs').iteritems())
 for i,(k,v) in sweeps:
     sweepkey = 'sweep-' + k
     for num,h in r.hgetall(sweepkey).iteritems():
@@ -23,7 +25,7 @@ for i,(k,v) in sweeps:
         print "[%d] with %d samples: " % (i,count)
         for kk,vv in js.loads(v).iteritems():
             if kk == 'graph':
-                print '\t'+kk+':\t'+str(hash(v))
+                print '\t'+kk+':\t'+str(sha.sha(vv).hexdigest())[:8]
             else:
                 print "\t{0}: {1}".format(kk,vv)
     count = 0
@@ -32,6 +34,10 @@ if len(valid_selections) == 0:
     print("No selections currently available.")
     sys.exit()
 sel = raw_input("Select which sweep you want to plot: ")
+try:
+    sel = int(sel)
+except:
+    sys.exit()
 if int(sel) not in valid_selections:
     print("Incorrect choice, please try again.")
     sys.exit()
@@ -51,10 +57,9 @@ for num,h in hashes.iteritems():
 
 #p.hold(True)
 means = [data[x].mean() for x in quants]
-
 errs = [data[x].std() for x in quants]
-
-p.errorbar(quants, means, yerr=errs, fmt='o')
+quants = np.array(quants) + np.random.randint(0,5)
+p.errorbar(quants, means, yerr=errs, fmt='o', markersize=10)
 p.grid(True)
 p.show()
 

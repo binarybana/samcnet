@@ -5,7 +5,7 @@ SyncGroup = namedtuple('SyncGroup', 'hostname dir cde')
 
 syncgroups = {'cesg': SyncGroup('raptor', '/home/bana', True),
     'gsp': SyncGroup('kubera', '/home/jason/samc/samcsynthetic-0.2', False),
-    'camdi': SyncGroup('camdi', '/home/bana/GSP/research/samc/code', False),
+    'camdi16': SyncGroup('camdi16', '/home/bana/GSP/research/samc/code', False),
     'toxic': SyncGroup('toxic','/home/jason', True),
     'sequencer': SyncGroup('sequencer','/home/jason', True)}
 
@@ -19,8 +19,8 @@ for x in cesg_small:
       True,
       7)
 
-cesg_large = 'raptor blackbird hornet'.split()
-cores = [20,25,20]
+cesg_large = 'raptor hornet'.split()# blackbird
+cores = [40,40]
 for c,x in zip(cores, cesg_large):
   serverconfigs[x] = ServerConfig(x, 
       '/home/bana',  
@@ -28,7 +28,7 @@ for c,x in zip(cores, cesg_large):
       True,
       c)
 
-gsp_compute = ['compute-0-%d'%x for x in range(1,4)] + ['kubera']
+gsp_compute = ['compute-0-%d'%x for x in range(4,8)] #+ ['kubera']
 gsp_compute_all = ['compute-0-%d'%x for x in range(1,8)] + ['kubera']
 for x in gsp_compute_all:
   serverconfigs[x] = ServerConfig(x, 

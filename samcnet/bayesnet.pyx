@@ -14,15 +14,9 @@ import numpy as np
 cimport numpy as np
 
 cdef class BayesNet:
-    cdef public:
-        object nodes,states,data,graph,x,mat,fvalue,changelist,table
-        object oldmat, oldx, oldfvalue
-        object template, ntemplate, groundgraph, ngroundgraph
-        int limparent, data_num, node_num, changelength, lastscheme
-        double prior_alpha, prior_gamma
-    cdef:
-        int **cmat, **cdata
-        double **ctemplate
+    def __cinit__(self, *args, **kwargs):
+        pass
+    
     def __init__(self, nodes, states, data, template=None, priorweight=1.0):
         """
         nodes: a list of strings for the nodes
@@ -48,10 +42,10 @@ cdef class BayesNet:
 
         # Template and Ground truth networks
         if template == None:
-            self.template = None
+            self.gtemplate = None
             self.ntemplate = np.zeros((self.node_num, self.node_num), dtype=np.double)
         else:
-            self.template = template.copy()
+            self.gtemplate = template.copy()
             self.ntemplate = np.asarray(nx.to_numpy_matrix(template), dtype=np.double)
         np.fill_diagonal(self.ntemplate, 1.0) 
         self.ctemplate = npy2c_double(self.ntemplate)
@@ -68,8 +62,6 @@ cdef class BayesNet:
         self.changelength = self.node_num
         self.cmat = npy2c_int(self.mat)
         self.cdata = npy2c_int(self.data)
-
-        self.lastscheme = -1
 
     #def __del__(self):
         #""" This should not be expected to run (google python's behavior
@@ -89,7 +81,7 @@ cdef class BayesNet:
         if db == None:
             return np.zeros(size, dtype=dtype)
         elif db.shape[0] != size:
-            return np.resize(size)
+            return np.resize(db, size)
         else:
             raise Exception("DB not initialized!")
 
@@ -211,7 +203,6 @@ cdef class BayesNet:
         self.oldfvalue = self.fvalue.copy()
 
         scheme = np.random.randint(1,4)   
-        self.lastscheme = scheme
 
         if scheme==1: # temporal order change 
             k = np.random.randint(self.node_num-1)

@@ -3,7 +3,7 @@ import os, sys, shlex, time, sha
 import subprocess as sb
 import redis
 import simplejson as js
-from samcnet.server_configs import serverconfigs, syncgroups, cesg_small, cesg_large, gsp_compute
+from samcnet.server_configs import serverconfigs, syncgroups, cesg_small, cesg_large, gsp_compute, gsp_compute_all
 
 LocalRoot = '/home/bana/GSP/research/samc/code'
 
@@ -12,11 +12,11 @@ def launchClient(host):
     if host.cde:
         spec = ('ssh {0.hostname} cd {0.root}/cde-package/cde-root/' \
                 + 'home/bana/GSP/research/samc/code; ').format(host) \
-                + ('nohup {0.python} samcnet/driver.py {1} >/dev/null 2>&1 &'.format(host,cores))
+                + ('nohup {0.python} -m samcnet.driver {1} >/dev/null 2>&1 &'.format(host,cores))
     else:
         spec = ('ssh {0.hostname} cd {0.root};' + \
                 'LD_LIBRARY_PATH=./build:$LD_LIBRARY_PATH nohup {0.python} '+ \
-                'samcnet/driver.py {1} >/dev/null 2>&1 &').format(host,cores)
+                '-m samcnet.driver {1} >/dev/null 2>&1 &').format(host,cores)
 
     print "Connecting to %s." % host.hostname
     p = sb.Popen(shlex.split(spec), 
@@ -32,31 +32,35 @@ def manualKill(host):
 
 def sync(group):
     if group.cde:
-        print ("Beginning rsync to %s... " % group.hostname)
+        print ("Beginning cde rsync to %s... " % group.hostname)
         p = sb.Popen('rsync -acz {0}/cde-package {1.hostname}:{1.dir}'.format(LocalRoot, group).split())
     else:
-        print "Beginning rsync... "
-        p = sb.Popen('rsync -acz --exclude=*cde* --exclude=build {0}/ {1.hostname}:{1.dir}/'.format(LocalRoot, group).split())
+        print ("Beginning code rsync to %s... " % group.hostname)
+        p = sb.Popen('rsync -acz --exclude=*cde* --exclude=lib --exclude=.lock* --exclude=build {0}/ {1.hostname}:{1.dir}/'.format(LocalRoot, group).split())
         print ' Done.'
         p.wait()
-        print 'Beginning remote rebuild...'
+        print ("Beginning remote build to %s... " % group.hostname)
         p = sb.Popen(shlex.split('ssh {0.hostname} "cd {0.dir}; ./waf distclean; . cfg; ./waf"'.format(group)))
     p.wait()
     print ' Done.'
 
 def updateCDE():
     print "Updating CDE package..." 
-    os.environ['LD_LIBRARY_PATH']='./build:../build'
+    os.environ['LD_LIBRARY_PATH']='build:lib'
+    os.environ['PYTHONPATH']=LocalRoot
     os.chdir(LocalRoot)
-    p = sb.Popen('/home/bana/bin/cde python {0}/samcnet/driver.py rebuild'.format(LocalRoot).split())
+    #p = sb.Popen('/home/bana/bin/cde python {0}/samcnet/driver.py rebuild'.format(LocalRoot).split())
+    p = sb.Popen('/home/bana/bin/cde python -m samcnet.driver rebuild'.split())
     p.wait()
     p = sb.Popen('rsync -a samcnet cde-package/cde-root/home/bana/GSP/research/samc/code/'.format(LocalRoot).split())
     p.wait()
-    p = sb.Popen('rsync -a build cde-package/cde-root/home/bana/GSP/research/samc/code/'.format(LocalRoot).split())
+    p = sb.Popen('rsync -a lib cde-package/cde-root/home/bana/GSP/research/samc/code/'.split())
+    p.wait()
+    p = sb.Popen('rsync -a build cde-package/cde-root/home/bana/GSP/research/samc/code/'.split())
     p.wait()
     print " Done."
 
-def postJob(job, samples):
+def postJob(job, samples, single=False):
     """
     Take a dictionary with a minimum of the following keys defined (values are just examples):
             nodes = 5,
@@ -69,14 +73,16 @@ def postJob(job, samples):
     jsonjob = js.dumps(job)
     h = sha.sha(jsonjob).hexdigest()
     r.hsetnx('configs', h, jsonjob)
+    if single:
+        r.hsetnx('single-configs', h, jsonjob)
     tot = r.hincrby('desired-samples', h, samples)
     print("Added %d samples for a total of %d samples remaining." % (samples,tot))
-    print("Pushed job:" )
+    print("Pushed job: hash %s" % h[:8])
     for k,v in job.iteritems():
-        if k == 'graph':
-            print '\t'+k+':\t'+str(hash(v))
+        if k == 'graph' or k == 'joint':
+            print '   {0:<20} {1:<30}'.format(k, str(sha.sha(v).hexdigest())[:8])
         else:
-            print '\t'+k+':\t'+str(v)
+            print '   {0:<20} {1:<30}'.format(k, str(v))
 
 def postSweep(base, iters, param, values):
     """ 
@@ -123,6 +129,19 @@ def kill(target):
     finally:
         r.delete('die')
 
+def getGraph(N, intercon = 2):
+        from samcnet.utils import drawGraphs
+        import networkx as nx
+        import numpy as np
+        from samcnet.generator import generateHourGlassGraph
+        cont = 'n'
+        while cont != 'y':
+            g = generateHourGlassGraph(N, intercon)
+            drawGraphs(g)
+            cont = raw_input('Is this graph okay? (y/n): ')
+        return g
+
+
 if __name__ == '__main__':
     if len(sys.argv) < 2:
         print "Usage: python exec.py [sync <groupname>] [syncall]"+\
@@ -156,7 +175,7 @@ if __name__ == '__main__':
     elif goal == 'launchgroup':
         #for host in cesg_small:
         #for host in gsp_compute + 'toxic sequenceanalyze bana-desktop'.split():
-        for host in gsp_compute + cesg_small + 'raptor blackbird compute-0-5 camdi16 toxic sequenceanalyze bana-desktop'.split():
+        for host in cesg_small + 'camdi16 raptor hornet toxic sequenceanalyze bana-desktop'.split():
             cfg = serverconfigs[host]
             launchClient(cfg)
 
@@ -165,7 +184,7 @@ if __name__ == '__main__':
         import networkx as nx
         import numpy as np
         from samcnet.generator import generateHourGlassGraph
-        g = generateHourGlassGraph(15, 2)
+        g = generateHourGlassGraph(4, 1)
         drawGraphs(g)
         base = dict(
             nodes = 15,
@@ -178,46 +197,54 @@ if __name__ == '__main__':
             seed = 12341234,
             note = 'Fixed graph, small priorweight.',
             numtemplate=15)
-        #test = dict(
-            #nodes = 5,
-            #samc_iters=1e4,
-            #numdata=50,
-            #priorweight=10,
-            #numtemplate=5)
-        postJob(base, samples=1)
+        postJob(base, samples=10)
 
     elif goal == 'post':
-        test = dict(
-            nodes = 20,
-            samc_iters=3e5,
-            numdata=10,
-            priorweight=500,
-            numtemplate=15)
-        postJob(test, samples=20)
-
-    elif goal == 'postsweep':
-        from samcnet.utils import drawGraphs
         import networkx as nx
         import numpy as np
-        from samcnet.generator import generateHourGlassGraph
-        cont = 'n'
-        while cont != 'y':
-            g = generateHourGlassGraph(40, 3)
-            #drawGraphs(g)
-            cont = 'y'#raw_input('Is this graph okay? (y/n): ')
+        N = 5
+        g = getGraph(N)
         base = dict(
-            nodes = 50,
-            samc_iters='sweep',
-            numdata=0,
-            priorweight=100,
-            experiment_type='single',
-            gen_method = 'noisylogic',
+            nodes = N,
+            samc_iters = 1e6,
+            numdata = 0,
+            priorweight = 4,
+            experiment_type = 'single',
+            gen_method = 'dirichlet',
             graph = np.array(nx.to_numpy_matrix(g),dtype=np.int32).tostring(),
             seed = 12341234,
             noise = 0.05,
-            note = '3: No data, just templates, how long?',
-            numtemplate=100)
-        postSweep(base, 50, 'samc_iters', [1e5, 2.5e5, 5e5, 1e6, 2e6])
+            note = 'Cohesion: no data',
+            stepscale = 100000,
+            burn = 200000,
+            truncate = 3,
+            numtemplate=10)
+        postJob(base, samples=10, single=True)
+
+    elif goal == 'postsweep':
+        import networkx as nx
+        import numpy as np
+        N = 8
+        g = getGraph(N)
+        base = dict(
+            nodes = N,
+            samc_iters=1e6,
+            numdata='sweep',
+            priorweight=4,
+            experiment_type='single',
+            gen_method = 'dirichlet',
+            graph = np.array(nx.to_numpy_matrix(g),dtype=np.int32).tostring(),
+            seed = 12341234,
+            noise = 0.05,
+            note = '1a with template',
+            burn = 10000,
+            stepscale = 100000,
+            truncate = 3,
+            numtemplate=10)
+        postSweep(base, 10, 'numdata', [0,10,20,30,40,50,80])
+        base['numtemplate'] = 0
+        base['note'] = '1b without temp'
+        postSweep(base, 10, 'numdata', [0,10,20,30,40,50,80])
 
     elif goal == 'cleanjobs':
         joblist = r.hgetall('desired-samples')
@@ -242,6 +269,23 @@ if __name__ == '__main__':
         kill(sys.argv[2])
 
     elif goal == 'status':
+        if len(sys.argv) == 3:
+            verbose=True
+        else:
+            verbose=False
+        print("The job list is currently:")
+        joblist = r.hgetall('desired-samples')
+        for i,x in joblist.iteritems():
+            #print '\t%s\t%s' % (r.hget('configs',i),x)
+            if verbose or int(x) > 0:
+                print '\t%s: %3s' % (i[:8],x)
+
+        print 'Current sample counts:'
+        for x in joblist.keys():
+            count = r.llen(x)
+            if verbose or count > 0:
+                print '\t%s: %3d' % (x[:8],count)
+
         clients = r.zrevrange('clients-hb', 0, -1)
         num = len(clients)
         if num == 0:
@@ -255,14 +299,5 @@ if __name__ == '__main__':
                         % (x, curr_time[0] + (curr_time[1]*1e-6) - int(r.zscore('clients-hb',x)))
                 cores += serverconfigs[x].cores
 
-            print("Cores active: %d" % cores)
-        print("The job list is currently:")
-        joblist = r.hgetall('desired-samples')
-        for i,x in joblist.iteritems():
-            #print '\t%s\t%s' % (r.hget('configs',i),x)
-            print '\t%s: %s' % (i,x)
-
-        print 'Current sample counts:'
-        for x in joblist.keys():
-            print '\t%s: %3d' % (x,r.llen(x))
+            print("Total online cores: %d" % cores)
 
