@@ -31,6 +31,8 @@ def generateHourGlassGraph(nodes=10, interconnects = 0):
         g.add_edges_from(zip(*zip(*e)[::-1]))
 
     kernel = lambda x: x**0.0001
+    if nodes < 4:
+        return nx.gn_graph(nodes,kernel)
     n1 , n2 = int(floor(nodes/2.)), int(ceil(nodes/2.))
     x1 = nx.gn_graph(n1, kernel)
     x2 = nx.gn_graph(n2, kernel)
