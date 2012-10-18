@@ -44,11 +44,11 @@ cdef class BayesNetCPD(BayesNet):
     def __cinit__(self, *args, **kwargs):
         pass
     
-    def __init__(self, nodes, states, data, intemplate=None, priorweight=1.0):
-        BayesNet.__init__(self, nodes, states, data, intemplate, priorweight)
+    def __init__(self, states, data, intemplate=None, priorweight=1.0):
+        BayesNet.__init__(self, states, data, intemplate, priorweight)
 
         self.joint = JointDistribution()
-        for name,arity in zip(nodes,states):
+        for name,arity in zip(self.nodes,states):
             self.joint.add_distribution(CPD(name, arity, {(): np.ones(arity-1)/float(arity)}))
 
         self.logqfactor = 0.0
@@ -168,7 +168,7 @@ cdef class BayesNetCPD(BayesNet):
         #print("PROPOSING")
         #print self.joint
 
-        cdef int i,j,i1,j1,i2,j2,edgedel
+        cdef int i,j,i1,j1,i2,j2,edgedel,scheme
         self.oldmat = self.mat.copy()
         self.oldx = self.x.copy()
         self.oldfvalue = self.fvalue.copy()
@@ -314,4 +314,6 @@ cdef class BayesNetCPD(BayesNet):
             #print k, v.parent_domain, v.params
 
         #print "#############################################"
+
+        return scheme
 

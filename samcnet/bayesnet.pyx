@@ -17,7 +17,7 @@ cdef class BayesNet:
     def __cinit__(self, *args, **kwargs):
         pass
     
-    def __init__(self, nodes, states, data, template=None, priorweight=1.0):
+    def __init__(self, states, data, template=None, priorweight=1.0):
         """
         nodes: a list of strings for the nodes
         states: a list of number of states for each node
@@ -26,12 +26,12 @@ cdef class BayesNet:
         template: A matrix of doubles \in[0,1.0] giving strength to the various connections
         Initializes the BayesNet as a set of independent nodes
         """
-        self.nodes = nodes
+        self.nodes = np.arange(states.shape[0], dtype=np.int)
         self.states = np.asarray(states,dtype=np.int32)
         self.data = np.asarray(data,dtype=np.int32)
 
         self.graph = nx.DiGraph()
-        self.graph.add_nodes_from(nodes)
+        self.graph.add_nodes_from(self.nodes)
 
         self.limparent = 4
         self.prior_alpha = 1.0
