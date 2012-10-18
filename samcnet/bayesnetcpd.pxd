@@ -1,4 +1,6 @@
 from bayesnet cimport BayesNet
+from dai_bind cimport FactorGraph, Var
+from libcpp.vector cimport vector
 
 cdef class MemoCounter:
     cdef public:
@@ -22,5 +24,9 @@ cdef class BayesNetCPD(BayesNet):
 
     """
     cdef public:
-      object joint, jointchanges, memo_table
+      #object memo_table
       double logqfactor # For RJMCMC weighting of the acceptance probability
+    cdef:
+      vector[Var] pnodes
+      vector[vector[ulong]] pdata
+      FactorGraph fg
