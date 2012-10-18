@@ -12,8 +12,8 @@ cimport numpy as np
 cdef class SAMCRun:
     cdef public:
         object obj, db, refden, hist, indicator, mapvalue, ground
-        int lowEnergy, highEnergy, scale, grid, accept_loc, total_loc, iteration, burn, stepscale
-        double rho, tau, mapenergy, delta,
+        int lowEnergy, highEnergy, grid, accept_loc, total_loc, iteration, burn, stepscale
+        double rho, tau, mapenergy, delta, scale
     def __init__(self, obj, ground=None, burn=100000, stepscale = 10000):
 
         self.obj = obj # Going to be a BayesNet for now, but we'll keep it general
@@ -47,7 +47,7 @@ cdef class SAMCRun:
         for i in range(2000):
             self.obj.propose()
             energy = self.obj.energy() 
-            r = oldenergy-energy
+            r = oldenergy-energy / 20.0 # Higher temperature for exploration
             if r > 0.0 or np.random.rand() < exp(r):
                 if energy < low:
                     low = energy
@@ -58,8 +58,8 @@ cdef class SAMCRun:
                 self.obj.reject()
 
         spread = high - low
-        if spread < 1000:
-            spread = 1000
+        #if spread < 1000:
+            #spread = 1000
         low = floor(low - .6 * spread)
         high = ceil(high)
         if low < 0:
@@ -67,9 +67,13 @@ cdef class SAMCRun:
 
         print "Done. Setting limits to (%d, %d)" % (low,high)
 
+        spread = high - low
+        self.scale = spread/500
+        print "Setting scale to %f" % (self.scale)
+
         self.lowEnergy = <int>low
         self.highEnergy = <int>high
-        self.grid = <int>ceil((self.highEnergy - self.lowEnergy) * self.scale)
+        self.grid = <int>ceil((self.highEnergy - self.lowEnergy) / self.scale)
 
         #self.refden = np.arange(self.grid, 0, -1, dtype=np.double)
         #self.refden = self.refden**2
@@ -78,7 +82,7 @@ cdef class SAMCRun:
         self.refden /= self.refden.sum()
         self.hist = np.zeros((3,self.grid), dtype=np.double)
 
-        self.hist[0,:] = np.arange(self.lowEnergy, self.highEnergy, 1./self.scale)
+        self.hist[0,:] = np.arange(self.lowEnergy, self.highEnergy, self.scale)
         self.indicator = np.zeros((self.grid),dtype=np.int32) # Indicator is whether we have visited a region yet
 
     def clear(self):
@@ -121,12 +125,12 @@ cdef class SAMCRun:
         elif energy < self.lowEnergy:
             return 0
         else: 
-            i = <int> floor((energy-self.lowEnergy)*self.scale)
+            i = <int> floor((energy-self.lowEnergy)/self.scale)
             return i if i<self.grid else self.grid-1
 
     #@cython.boundscheck(False) # turn off bounds-checking for entire function
-    def sample(self, iters, thin=1):
-        cdef int current_iter, accept, oldregion, newregion, i, nonempty, dbsize
+    def sample(self, int iters, double temperature = 1.0):
+        cdef int current_iter, accept, oldregion, newregion, i, nonempty, dbsize, scheme
         cdef double oldenergy, newenergy, r, un
         cdef np.ndarray[np.int32_t, ndim=1, mode="c"] indicator = \
                 self.indicator
@@ -140,6 +144,11 @@ cdef class SAMCRun:
         oldregion = self.find_region(oldenergy) # AKA nonempty
         indicator[oldregion] = 1
 
+        scheme_detail = {}
+        scheme_detail[1] = [0]*2
+        scheme_detail[2] = [0]*2
+        scheme_detail[3] = [0]*2
+
         dbsize = self.iteration + int(iters) - self.burn
         if dbsize < 0:
             dbsize = 0
@@ -150,9 +159,10 @@ cdef class SAMCRun:
         for current_iter in range(self.iteration, self.iteration + int(iters)):
             self.iteration += 1
 
+            #self.delta = temperature * float(self.stepscale) / max(self.stepscale, self.iteration)
             self.delta = float(self.stepscale) / max(self.stepscale, self.iteration)
 
-            self.obj.propose()
+            scheme = self.obj.propose()
             newenergy = self.obj.energy()
 
             if newenergy < self.mapenergy: # NB: Even if not accepted
@@ -165,34 +175,40 @@ cdef class SAMCRun:
 
             indicator[newregion] = 1
 
-            r = hist[oldregion] - hist[newregion] + (oldenergy-newenergy) #/self.temperature
+            r = hist[oldregion] - hist[newregion] + (oldenergy-newenergy) /temperature
             #print hist[oldregion] - hist[newregion], (oldenergy-newenergy)
             
-            #fid.write("%f,%f,%f,%f,%f,%f\n" % (hist[oldregion], hist[newregion], oldenergy,
-                #newenergy, r, self.obj.lastscheme))
-            
-            #print("r:%f\t oldregion:%d\t hist[old]:%f\t hist[new]:%f fold:%f, fnew:%f" %
-                    #(r,oldregion, hist[1,oldregion], hist[1,newregion], oldenergy, newenergy))
-
             if r > 0.0 or np.random.rand() < exp(r):
                 accept=1
             else:
                 accept=0;
 
+            #fid.write("%f,%f,%f,%f,%f,%f\n" % (hist[oldregion], hist[newregion], oldenergy,
+                #newenergy, r, self.obj.lastscheme))
+            
+            #print("%d\t r:%f\t oldregion:%d\t newregion:%d\thist[old]:%f\t hist[new]:%f fold:%f, fnew:%f" %
+                    #(accept, r,oldregion, newregion, hist[oldregion], 
+                        #hist[newregion], oldenergy, newenergy))
+
+
             if accept == 0:
                 self.hist[2,oldregion] += 1.0
                 self.obj.reject()
                 self.total_loc += 1
+                scheme_detail[scheme][0] += 1
             elif accept == 1:
                 self.hist[2,newregion] += 1.0
                 self.accept_loc += 1
                 self.total_loc += 1
                 oldregion = newregion
                 oldenergy = newenergy
+                scheme_detail[scheme][0] += 1
+                scheme_detail[scheme][1] += 1
                   
             locfreq[oldregion] += 1
             hist += self.delta*(locfreq-refden)
             locfreq[oldregion] -= 1
+
 
             if current_iter >= self.burn:
                 self.obj.save_to_db(self.db, 
@@ -212,4 +228,6 @@ cdef class SAMCRun:
         print("Accept_loc: %d" % self.accept_loc)
         print("Total_loc: %d" % self.total_loc)
         print("Acceptance: %f" % (float(self.accept_loc)/float(self.total_loc)))
+
+        return scheme_detail
 

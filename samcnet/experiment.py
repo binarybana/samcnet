@@ -56,10 +56,10 @@ except ImportError as e:
             " directory is populated by waf.")
     sys.exit()
 
-def sample(states, data, ground, template=None, iters=1e4, priorweight=1.0, burn=100000, stepscale=10000):
+def sample(states, data, ground, template=None, iters=1e4, priorweight=1.0, burn=100000, stepscale=10000, temperature = 1.0):
     nodes = np.arange(data.shape[1])
 
-    b = BayesNetCPD(nodes, states, data, template, priorweight)
+    b = BayesNetCPD(states, data, template, priorweight)
     if isinstance(ground, nx.DiGraph):
         ground = np.asarray(nx.to_numpy_matrix(ground), dtype=np.int32)
         np.fill_diagonal(ground, 1)
@@ -68,7 +68,7 @@ def sample(states, data, ground, template=None, iters=1e4, priorweight=1.0, burn
     s = SAMCRun(b,ground,burn,stepscale)
 
     t1 = time()
-    s.sample(iters)
+    s.sample(iters, temperature)
     t2 = time()
     logger.info("SAMC run took %f seconds." , (t2-t1))
     return b,s
@@ -151,13 +151,13 @@ elif __name__ == '__main__':
         #x = 1/0
         #sys.exit()
         N = 5
-        iters = 1e4
-        numdata = 20
+        iters = 1e5
+        numdata = 50
         priorweight = 5
         numtemplate = 5
         
-        random.seed(1234567)
-        np.random.seed(1234567)
+        random.seed(123456)
+        np.random.seed(123456)
 
         g1 = generateHourGlassGraph(nodes=N)
 
@@ -167,6 +167,8 @@ elif __name__ == '__main__':
         print "Effective sample size: %d" % len(set(map(tuple,d1)))
 
         t1 = sampleTemplate(g1, numtemplate)
+
+        #drawGraphs(g1)
 
         ###############################################
         #cProfile.runctx("sample(states1, d1, joint1, template=t1,iters=iters, priorweight=priorweight, burn=0, stepscale=40000)", globals(),locals(), "prof.prof")
@@ -180,7 +182,7 @@ elif __name__ == '__main__':
 
         ###############################################
         b,s = sample(states1, d1, joint1, template=t1,
-                iters=iters, priorweight=priorweight, burn=0, stepscale=40000)
+                iters=iters, priorweight=priorweight, burn=0, stepscale=10000, temperature=10)
 
         #es = []
         #newes = []
