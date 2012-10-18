@@ -80,28 +80,30 @@ def build(bld):
         target='bayesnet')
 
     bld(features='c cshlib cxx pyext',
-        source=['samcnet/bayesnetcpd.pyx'],
-        includes=['include'],
-        #libpath=['.','./build'],
-        cxxflags=CXXFLAGS,
-        ldflags=LDFLAGS,
-        target='bayesnetcpd')
-
-    bld(features='c cshlib cxx pyext',
         source=['samcnet/probability.pyx'],
         #libpath=['.','./build'],
-        includes=['include'],
+        includes=['deps/libdai/include'],
         cxxflags=CXXFLAGS,
         ldflags=LDFLAGS,
         target='probability')
 
-    CFLAGS.remove('-Wall')
     libs = ['MATH', 'DAI', 'GMP', 'GMPXX']
+
+    bld(features='c cshlib cxx pyext',
+        source=['samcnet/bayesnetcpd.pyx', 'samcnet/utils.cpp'],
+        includes=['deps/libdai/include','include'],
+        libpath=['lib','.','./build'],
+        use=libs,
+        cxxflags=CXXFLAGS,
+        ldflags=LDFLAGS,
+        target='bayesnetcpd')
+
+    CFLAGS.remove('-Wall')
     
     bld(features='c cshlib cxx pyext',
         source=['samcnet/pydai.pyx'],
         libpath=['lib'],
-        includes=['include'],
+        includes=['deps/libdai/include'],
         use=libs,
         cxxflags=CXXFLAGS,
         ldflags=LDFLAGS,

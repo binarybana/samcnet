@@ -4,3 +4,4 @@ build
 *.pyc
 cde.options
 cde-package
+*.so
