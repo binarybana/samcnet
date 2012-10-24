@@ -1,0 +1,3 @@
+[submodule "deps/libdai"]
+	path = deps/libdai
+	url = git@github.com:binarybana/libDAI.git
