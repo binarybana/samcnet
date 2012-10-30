@@ -13,7 +13,8 @@ import logging
 import logging.handlers
 from utils import getHost
 
-h = logging.handlers.SysLogHandler(('knight-server.dyndns.org',10514))
+#h = logging.handlers.SysLogHandler(('knight-server.dyndns.org',10514))
+h = logging.handlers.SysLogHandler(('camdi16.tamu.edu',10514))
 h.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(name)s: samc %(levelname)s %(message)s')
 h.setFormatter(formatter)
@@ -74,7 +75,8 @@ if __name__ == '__main__':
         sys.exit()
     else:
         logger.info('Connecting to db.')
-        r = redis.StrictRedis('knight-server.dyndns.org')
+        #r = redis.StrictRedis('knight-server.dyndns.org')
+        r = redis.StrictRedis('camdi16.tamu.edu')
         atexit.register(recordDeath)
         capacity = int(sys.argv[1])
         children = [None] * capacity

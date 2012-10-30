@@ -3,9 +3,9 @@ import os, sys, shlex, time, sha
 import subprocess as sb
 import redis
 import simplejson as js
-from samcnet.server_configs import serverconfigs, syncgroups, cesg_small, cesg_large, gsp_compute, gsp_compute_all
+from samcnet.server_configs import cfg
 
-LocalRoot = '/home/bana/GSP/research/samc/code'
+LocalRoot = cfg['local_root']
 
 def launchClient(host):
     cores = host.cores
@@ -27,7 +27,7 @@ def launchClient(host):
 def manualKill(host):
     print 'Killing processes on %s.' % host.hostname
     user = host.root.split('/')[2]
-    spec = 'ssh {0.hostname} killall -q -u {1} python; killall -q -u {1} python2.7; killall -q -u {1} cde-exec'.format(host, user)
+    spec = 'ssh {0.hostname} killall -q -u {1} python; killall -q -u {1} python2.7; killall -q -u {1} cde-exec; killall -q -u {1} sshd'.format(host, user)
     sb.Popen(shlex.split(spec))
 
 def sync(group):
@@ -150,7 +150,7 @@ if __name__ == '__main__':
 
     goal = sys.argv[1]
 
-    r = redis.StrictRedis('knight-server.dyndns.org')
+    r = redis.StrictRedis(cfg_redis_server)
 
     if goal == 'sync':
         assert sys.argv[2] in syncgroups
@@ -173,9 +173,7 @@ if __name__ == '__main__':
         launchClient(host)
 
     elif goal == 'launchgroup':
-        #for host in cesg_small:
-        #for host in gsp_compute + 'toxic sequenceanalyze bana-desktop'.split():
-        for host in cesg_small + 'camdi16 raptor hornet toxic sequenceanalyze bana-desktop'.split():
+        for host in cfg_launch_group.split():
             cfg = serverconfigs[host]
             launchClient(cfg)
 
@@ -224,11 +222,11 @@ if __name__ == '__main__':
     elif goal == 'postsweep':
         import networkx as nx
         import numpy as np
-        N = 8
+        N = 10
         g = getGraph(N)
         base = dict(
             nodes = N,
-            samc_iters=1e6,
+            samc_iters=5e5,
             numdata='sweep',
             priorweight=4,
             experiment_type='single',
@@ -239,8 +237,8 @@ if __name__ == '__main__':
             note = '1a with template',
             burn = 10000,
             stepscale = 100000,
-            truncate = 3,
-            numtemplate=10)
+            truncate = 100,
+            numtemplate=20)
         postSweep(base, 10, 'numdata', [0,10,20,30,40,50,80])
         base['numtemplate'] = 0
         base['note'] = '1b without temp'
@@ -258,11 +256,9 @@ if __name__ == '__main__':
         kill('all')
 
     elif goal == 'killall9':
-        for host in gsp_compute + cesg_small + 'kubera raptor toxic sequenceanalyze'.split():
-            cfg = serverconfigs[host]
+        for machine_cfg in cfg['server_configs'].values():
             time.sleep(0.2)
-            manualKill(cfg)
-        r.delete('clients-hb')
+            manualKill(machine_cfg)
 
     elif goal == 'kill':
         assert sys.argv[2] in serverconfigs
@@ -297,7 +293,7 @@ if __name__ == '__main__':
             for x in clients:
                 print '\t%s with hb %3.1f seconds ago' \
                         % (x, curr_time[0] + (curr_time[1]*1e-6) - int(r.zscore('clients-hb',x)))
-                cores += serverconfigs[x].cores
+                #cores += serverconfigs[x].cores
 
-            print("Total online cores: %d" % cores)
+            #print("Total online cores: %d" % cores)
 
