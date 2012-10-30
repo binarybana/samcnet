@@ -16,6 +16,7 @@ cdef class GroundNet:
         self.joint = joint
         self.jtree = self.makejtree(joint)
         self.mymarginal = None
+        self.entropy = self.calcNaiveEntropy()
 
     def makejtree(self, joint):
         fs = []
@@ -59,8 +60,28 @@ cdef class GroundNet:
         return self.jtree.marginal_array(*vs)
 
     def kld(self, JointDistribution other):
-        return self.naivekld(other)
-        #return naiveKLD(self.joint, other)
+        cdef int i
+        cdef double accum = 0
+        cdef double subsum = 0
+
+        jt = self.makejtree(other)
+
+        #for node,arity in self.joint.domain.iteritems():
+            #parents = self.joint.dists[node].sorted_parent_names
+            #numpars = len(parents)
+            #for pstate in parent_states:
+                #subsum = 0.0
+                #params = self.joint.dists[node].params[pstate]
+                #for nstate in range(arity-1):
+                    #subsum += params[nstate] * log(jt.belief(nstate+pstate) / jt.belief(pstate))
+                #nstate+=1
+                #subsum += (1 - params.sum()) * log(jt.belief(nstate+pstate) / jt.belief(pstate))
+                #subsum *= self.marginal(pstate)
+                #accum += subsum
+
+        return -self.entropy - accum
+
+        #return self.naivekld(other)
 
     def naivekld(self, JointDistribution other):
         cdef int i = len(self.joint.domain)
@@ -115,7 +136,7 @@ cdef class GroundNet:
                     subsum -= temp * log(temp)
                 sum += marginal_p[pa] * subsum
 
-            return sum
+        return sum
 
     def calcNaiveEntropy(self):
         cdef int i = len(self.joint.domain)
@@ -266,7 +287,7 @@ cdef class JointDistribution:
         s = ''
         for name in sorted(self.domain.keys()):
             dist = self.dists[name]
-            s += "%r, %r, %r, %r\n" % (dist.name, dist.parent_domain, dist.params, id(dist.parent_domain))
+            s += "%5r, %20r, %r\n" % (dist.name, dist.parent_domain, dist.params)
             #s += "%s, %s, %s\n" % (str(dist.name), str(dist.parent_domain), str(dist.params))
         return s
 
