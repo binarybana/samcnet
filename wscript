@@ -52,7 +52,7 @@ def build(bld):
         CFLAGS += ['-O2']
         CXXFLAGS += ['-O2']
 
-    bld.env.CYTHONFLAGS = CYTHONFLAGS
+    #bld.env.CYTHONFLAGS = CYTHONFLAGS
 
     bld.env['PREFIX'] = '.'
 
@@ -102,7 +102,7 @@ def build(bld):
     
     bld(features='c cshlib cxx pyext',
         source=['samcnet/pydai.pyx'],
-        libpath=['lib'],
+        libpath=['lib','.','build'],
         includes=['deps/libdai/include'],
         use=libs,
         cxxflags=CXXFLAGS,
