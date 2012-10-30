@@ -2,7 +2,8 @@
 cimport cython
 
 from bayesnet cimport BayesNet
-from dai_bind cimport FactorGraph, Factor, VarSet, Var
+from dai_bind cimport FactorGraph, Factor, VarSet, Var, calcState, calcLinearState,\
+        PropertySet
 cimport dai_bind as dai
 from libcpp.vector cimport vector
 from libcpp.string cimport string
@@ -13,7 +14,7 @@ cimport numpy as np
 
 import scipy.stats as st
 
-from collections import Counter
+from collections import Counter, defaultdict
 from math import lgamma, log
 
 cdef extern from "utils.h":
@@ -34,6 +35,7 @@ cdef class MemoCounter:
             self.memo_table[config] = c
             return c
 
+DEF DEBUG=0
 
 cdef class BayesNetCPD(BayesNet):
     """To initialize a BayesNetCPD we need:
@@ -53,7 +55,8 @@ cdef class BayesNetCPD(BayesNet):
 
     """
     def __cinit__(self, *args, **kwargs):
-        pass
+        self.memo_entropy = 0.0
+        self.dirty = True
     
     def __init__(self, states, data, intemplate=None, priorweight=1.0):
         cdef int i, j
@@ -70,10 +73,11 @@ cdef class BayesNetCPD(BayesNet):
 
         self.logqfactor = 0.0
         #self.memo_table = MemoCounter(data)
-        for i in range(data.shape[0]): 
-            self.pdata.push_back(vector[ulong]())
-            for j in range(data.shape[1]):
-                self.pdata[i].push_back(data[i,j])
+        if data.size:
+            for i in range(data.shape[0]): 
+                self.pdata.push_back(vector[ulong]())
+                for j in range(data.shape[1]):
+                    self.pdata[i].push_back(data[i,j])
         
     def update_graph(self, matx=None):
         """
@@ -100,17 +104,19 @@ cdef class BayesNetCPD(BayesNet):
     def copy(self):
         return (self.mat.copy(), self.x.copy(), 0 )# self.fg.clone()) # need to wrap this
 
-    def save_to_db(self, object db, double theta, double energy, int i, BayesNetCPD ground_truth):
-        func = 0 #ground_truth.kld(self.fg)
+    def save_to_db(BayesNetCPD self, object db, \
+            double theta, double energy, int i, BayesNetCPD ground_truth):
+        func = ground_truth.kld(self)
         assert db is not None, 'DB None when trying to save sample.'
         db[i] = np.array([theta, energy, func])
 
-    @cython.boundscheck(False)
+    #@cython.boundscheck(False)
     def energy(self):
         """ 
         Calculate the -log probability. 
         """
-        print "Energy top"
+        IF DEBUG:
+            print "Energy top"
         #cdef float alphaik,alphaijk,sum,priordiff,accum = 0.0
         #cdef int i,node,j,l,parstate
         cdef np.ndarray[np.int32_t, ndim=1, mode="c"] x = \
@@ -156,35 +162,181 @@ cdef class BayesNetCPD(BayesNet):
                 #accum += (node_par_counts[pval + (cpd.arity-1,)] + alphaijk -1) * log((1 - fastp.sum()))
 
             #self.fvalue[i] = accum;
+            # WAT?! How can this i index possibly be right? it should be node
+            # or x[node] right?!?
             #self.fvalue[i] *= -1.0;
 
-        cdef int i
-        cdef double sum, priordiff, accum = 0
+        cdef int i,j,node,data,index,arity,parstate,state
+        cdef double sum, priordiff, accum, accumgold
+        accum = 0
+        accumgold = 0
+
+        # Limit the number of parents
+        for i in range(self.changelength):
+            if self.fg.factor(x[self.changelist[i]]).vars().size()-1 > self.limparent:
+                return 1e20
+
+        cdef vector[vector[int]] counts = vector[vector[int]]()
+        for i in range(self.changelength):
+            node = x[self.changelist[i]]
+            counts.push_back(vector[int](self.fg.factor(node).nrStates()))
         
-        for i in range(self.pdata.size()):
-            accum -= self.fg.logScore(self.pdata[i])
+        for data in range(self.pdata.size()):
+            for i in range(counts.size()):
+                node = x[self.changelist[i]]
+                index = self.convert(node, self.pdata[data])
+                counts[i][index] = counts[i][index] + 1
 
-        sum = accum
+        accum = 0
+        for i in range(counts.size()):
+            node = x[self.changelist[i]]
+            arity = self.pnodes[node].states()
+            numparstates = self.fg.factor(node).nrStates()/arity
+            alpha_ijk = self.prior_alpha/numparstates/arity
+            alpha_ik = self.prior_alpha/numparstates
+            for parstate in range(numparstates):
+                accum -= lgamma(alpha_ijk) * arity
+                accum += lgamma(alpha_ik)
+                for state in range(arity):
+                    index = self.convert_separate(node, state, parstate)
+                    accum += log(self.fg.factor(node).get(index))*(counts[i][index] + alpha_ijk - 1)
 
-        print "energy bottom. energy: %f" % accum
+
+            self.fvalue[node] = -1.0 * accum
+
+        sum = self.fvalue.sum()
+
+        # Gold standard
+        #for i in range(self.pdata.size()):
+            #accumgold -= self.fg.logScore(self.pdata[i])
+
+        IF DEBUG:
+            print "energy bottom. energy: %f" % accum
+            print "energy: marginal likelihood %f; struct prior %f; qfactor %f" % \
+                    (sum, priordiff*self.prior_gamma, self.logqfactor)
 
         priordiff = 0.0
         for i in range(self.node_num):
             for j in range(self.node_num):
                 if(j!=i):
                     priordiff += abs(mat[j,i] - ntemplate[x[j],x[i]])
-        #print "energy: marginal likelihood %f; struct prior %f; qfactor %f" % (sum, priordiff*self.prior_gamma, self.logqfactor)
         sum += (priordiff)*self.prior_gamma
         sum -= self.logqfactor #TODO Check this negative sign
 
         return sum
 
+    cdef int convert(BayesNetCPD self, int node, vector[ulong] state):
+        cdef int i
+        cdef map[Var, size_t] statemap
+        for i in range(state.size()):
+            statemap[self.pnodes[i]] = state[i]
+        return calcLinearState(self.fg.factor(node).vars(), statemap)
+
+    cdef int convert_separate(BayesNetCPD self, int node, int state, int parstate):
+        cdef int i
+        cdef VarSet vars = self.fg.factor(node).vars()
+        cdef map[Var, size_t] mapstate = calcState( vars/VarSet(self.pnodes[node]), parstate)
+        mapstate[self.pnodes[node]] = state
+        return calcLinearState(vars, mapstate)
+
+    def kld(self, BayesNetCPD other):
+        if self.dirty:
+            self.memo_entropy = self.entropy()
+        # Now we know our entropy AND our JTree are correct
+
+        cdef:
+            double accum, subaccum, cpd_lookup, prob
+            VarSet jointvars, parvars
+            Factor marginal, joint
+            map[Var, size_t] mapstate
+            int index
+
+        accum = 0.0
+        for i in range(self.fg.nrFactors()):
+            arity = other.pnodes[i].states()
+            numparstates = other.fg.factor(i).nrStates()/arity
+            # Here we use assumption that the vars are equatable from the
+            # two BNs
+            parvars = other.fg.factor(i).vars()/VarSet(other.pnodes[i])
+            marginal = self.jtree.calcMarginal(parvars)
+
+            jointvars = other.fg.factor(i).vars()
+            joint = self.jtree.calcMarginal(jointvars)
+            for parstate in range(numparstates):
+                subaccum = 0.0
+                mapstate = calcState(parvars, parstate)
+                for state in range(arity):
+                    cpd_lookup = other.fg.factor(i)[other.convert_separate(i, state, parstate)]
+                    mapstate[self.pnodes[i]] = state
+                    index = calcLinearState(jointvars, mapstate) 
+                    # Is this actually necessary? 
+                    # Or does index == other.convert_separate(i, state,
+                    # parstate)?
+                    prob = joint[index]/marginal[parstate]
+                    subaccum += prob * log(cpd_lookup)
+                accum += marginal[parstate] * subaccum
+        return -self.memo_entropy - accum
+
+    def entropy(self):
+        cdef PropertySet ps = PropertySet('[updates=HUGIN]')
+        cdef int i,parstate,state,arity,numparstates
+        cdef double accum, accumsub, temp
+
+        cdef Factor marginal
+
+        self.jtree = JTree(self.fg, ps)
+        self.jtree.init()
+        self.jtree.run()
+        accum = 0.0
+        for i in range(self.fg.nrFactors()):
+            arity = self.pnodes[i].states()
+            numparstates = self.fg.factor(i).nrStates()/arity
+            marginal = self.jtree.calcMarginal(self.fg.factor(i).vars()/VarSet(self.pnodes[i]))
+            for parstate in range(numparstates):
+                accumsum = 0.0
+                for state in range(arity):
+                    temp = self.fg.factor(i)[self.convert_separate(i, state, parstate)]
+                    accumsum -= temp * log(temp)
+                accum += marginal[parstate] * accumsum
+
+        self.dirty = False
+        return accum
+
+    def naive_entropy(self):
+        cdef:
+            int numstates,i
+            double temp,accumsum,accumprod,accum
+            map[Var, size_t] statemap
+            VarSet allvars = VarSet(self.pnodes.begin(), self.pnodes.end(), self.pnodes.size())
+
+        numstates = 1
+        accum = 0.0
+
+        for i in range(self.pnodes.size()):
+            numstates *= self.pnodes[i].states()
+
+        for i in range(numstates):
+            accumsum = 0.0
+            accumprod = 1.0
+            statemap = calcState(allvars, i)
+            for j in range(self.fg.nrFactors()):
+                temp = self.fg.factor(j)[calcLinearState(self.fg.factor(j).vars(), statemap)]
+                accumsum += log(temp)
+                accumprod *= temp
+            accum += accumsum * accumprod
+
+        # Cannot put dirty to false here because our JTree is not up to date.
+        return -accum
+
     def reject(self):
         """ Revert graph, mat, x, fvalue, changelist, and changelength. """
-        #print("REJECTING")
+        IF DEBUG:
+            print("REJECTING")
         self.mat = self.oldmat
         self.x = self.oldx
         self.fvalue = self.oldfvalue
+        self.dirty = True # without checking more carefully, we do 
+        #the safe and simple thing here
 
         self.restore_backups()
 
@@ -195,16 +347,28 @@ cdef class BayesNetCPD(BayesNet):
     def propose(self):
         """ 'Propose' a new network structure by backing up the old one and then 
         changing the current one. """
-        print "#############################################"
 
         cdef int i,j,i1,j1,i2,j2,edgedel,scheme
         self.oldmat = self.mat.copy()
         self.oldx = self.x.copy()
         self.oldfvalue = self.fvalue.copy()
+        self.dirty = True
+        cdef np.ndarray[np.int32_t, ndim=1, mode="c"] x = \
+                self.x
 
         scheme = np.random.randint(1,4)   
         self.clear_backups()
-        print("PROPOSING Scheme %d" % scheme)
+        addlist, dellist = defaultdict(list), defaultdict(list)
+
+        IF DEBUG:
+            print "#############################################"
+            print("PROPOSING Scheme %d" % scheme)
+            s = self.x.argsort()
+            print "old mat:"
+            print self.mat[s].T[s].T
+            print " ##### "
+            print "old x:"
+            print x
 
         if scheme==1: # temporal order change 
             k = np.random.randint(self.node_num-1)
@@ -220,25 +384,17 @@ cdef class BayesNetCPD(BayesNet):
             
             # Change parameters:
             self.logqfactor = 0.0
+            IF DEBUG:
+                print "swapping k=%d and k+1=%d" % (x[k],x[k+1])
 
             #For any parents of node k not shared with k+1 (and vice versa):
             for i in range(0, k):
                 if self.mat[i,k] and not self.mat[i,k+1]:
-                    self.logqfactor += self.remove_parent(
-                            self.x[k],
-                            self.x[i])
-                    self.logqfactor += self.add_parent(
-                            self.x[k+1],
-                            self.x[i],
-                            self.states[self.x[i]])
+                    dellist[x[k]].append(x[i])
+                    addlist[x[k+1]].append(x[i])
                 elif not self.mat[i,k] and self.mat[i,k+1]:
-                    self.logqfactor += self.add_parent(
-                            self.x[k],
-                            self.x[i],
-                            self.states[self.x[i]])
-                    self.logqfactor += self.remove_parent(
-                            self.x[k+1],
-                            self.x[i])
+                    dellist[x[k+1]].append(x[i])
+                    addlist[x[k]].append(x[i])
 
             self.changelength = 2
 
@@ -246,34 +402,19 @@ cdef class BayesNetCPD(BayesNet):
             for j in range(k+2, self.node_num):
                 #print self.mat[k,j], self.mat[k+1,j]
                 if self.mat[k,j] and not self.mat[k+1,j]:
-                    self.logqfactor += self.remove_parent(
-                            self.x[j],
-                            self.x[k])
-                    self.logqfactor += self.add_parent(
-                            self.x[j],
-                            self.x[k+1],
-                            self.states[self.x[k+1]])
+                    dellist[x[j]].append(x[k])
+                    addlist[x[j]].append(x[k+1])
                     self.changelength += 1
                     self.changelist[self.changelength-1] = j
                 elif not self.mat[k,j] and self.mat[k+1,j]:
-                    self.logqfactor += self.remove_parent(
-                            self.x[j],
-                            self.x[k+1])
-                    self.logqfactor += self.add_parent(
-                            self.x[j],
-                            self.x[k],
-                            self.states[self.x[k]])
+                    dellist[x[j]].append(x[k+1])
+                    addlist[x[j]].append(x[k])
                     self.changelength += 1
                     self.changelist[self.changelength-1] = j
             
             if self.mat[k,k+1]:
-                self.logqfactor += self.remove_parent(
-                        self.x[k+1],
-                        self.x[k])
-                self.logqfactor += self.add_parent(
-                        self.x[k],
-                        self.x[k+1],
-                        self.states[self.x[k+1]])
+                dellist[x[k+1]].append(x[k])
+                addlist[x[k]].append(x[k+1])
 
             self.x[k], self.x[k+1] = self.x[k+1], self.x[k]
             self.changelist[0], self.changelist[1] = k, k+1
@@ -287,6 +428,8 @@ cdef class BayesNetCPD(BayesNet):
             if i>j:
                 i,j = j,i
 
+            IF DEBUG:
+                print "toggling edge (i,j)=(%d,%d)" % (x[i],x[j])
             #print np.arange(self.node_num)
             #print self.x
             #print ""
@@ -303,72 +446,79 @@ cdef class BayesNetCPD(BayesNet):
             # Change parameters:
             #print "adding edge: base node %d, parent node %d" % (self.nodes[self.x[j]], self.nodes[self.x[i]])
             if edgedel:
-                self.logqfactor = self.remove_parent(
-                        self.x[j],
-                        self.x[i])
+                dellist[x[j]].append(x[i])
             else:
-                self.logqfactor = self.add_parent(
-                        self.x[j],
-                        self.x[i],
-                        self.states[self.x[i]])
+                addlist[x[j]].append(x[i])
 
         if scheme==3: # Null move (parameters only)
+
             k = np.random.randint(self.node_num-1)
 
-            self.logqfactor = self.move_params(self.x[k])
+            IF DEBUG:
+                print "null moving node k=%d" % (x[k])
+
+            self.logqfactor = self.move_params(x[k])
 
             self.changelength=1
             self.changelist[0]=k
 
-        print("DONE PROPOSING. Scheme: %d" % scheme)
-        #print self.mat
-        #s = self.x.argsort()
-        #print ""
-        #print self.mat[s].T[s].T
-        #print ''
+        if scheme != 3:
+            for node in set(addlist.keys() + dellist.keys()):
+                self.logqfactor += self.adjust_factor(node, addlist[node], dellist[node])
 
-        #print ''
-
-
-        print "#############################################"
+        IF DEBUG:
+            s = self.x.argsort()
+            print "new mat:"
+            print self.mat[s].T[s].T
+            print " ##### "
+            print "new x:"
+            print self.x
+            
+            print("DONE PROPOSING. Scheme: %d" % scheme)
+            print "#############################################"
 
         return scheme
     
-    def add_parent(self, int node, int parent, int arity):
-        #make a new factor 
+    def adjust_factor(self, int node, object addlist, object dellist):
+        cdef int s
         cdef Factor oldfac = self.fg.factor(node)
-        cdef VarSet vars = oldfac.vars()
-        cdef Factor newfac = oldfac.embed(vars.insert(self.pnodes[parent]))
 
-        #print "Node %d, Added parent %d, new params: %s" % (self.name,name,str(self.params))
+        cdef VarSet oldvars = oldfac.vars()
+
+        cdef VarSet addvars = VarSet()
+        cdef VarSet delvars = VarSet()
+
+        for var in addlist:
+            addvars.insert(self.pnodes[var])
+        for var in dellist:
+            delvars.insert(self.pnodes[var])
+
+        cdef VarSet newvars = (oldvars|addvars)/delvars
+        cdef Factor newfac = Factor(newvars)
+
+        for s in range(newfac.nrStates()):
+            newval = oldfac.get(calcLinearState(oldvars, calcState(newvars, s)))
+            newfac.set(s, newval) 
+
+        self.fg.setFactor(node, newfac, True)
         
-        #self.fg.setFactor(node, newfac, True)
-        
+        IF DEBUG:
+            print "## Adjusted factors"
+            print "### old fac"
+            print crepr(oldfac)
+            print "### new fac"
+            print crepr(newfac)
+
         # Calculate logqfactor from arity of new parents (use
         # B of dirichlet distribution from wikipedia)
         #return new_count * lgamma(self.arity)
-        return 0 # As we are not introducing new parameters right?
-    
-    def remove_parent(self, int node, int parent):
-        print "Node %d, Removing parent %d" % (node, parent)
-        print self.mat[s].T[s].T
-        cdef Factor oldfac = self.fg.factor(node)
-
-        print "### oldfac"
-        print crepr(oldfac)
-
-        cdef VarSet vars = oldfac.vars()
-        cdef Factor newfac = oldfac.marginal(vars.erase(self.pnodes[parent]))
-
-        print "### newfac"
-        print crepr(newfac)
-
-        self.fg.setFactor(node, newfac, True)
-
-        # Calculate logqfactor from arity of dropped parents (use
-        # B of dirichlet distribution from wikipedia)
-        #return -rem_count * lgamma(self.arity)
-        return 0 # As we are not introducing new parameters right?
+        #return 0 # As we are not introducing new parameters right?
+        
+        ## Calculate logqfactor from arity of dropped parents (use
+        ## B of dirichlet distribution from wikipedia)
+        ##return -rem_count * lgamma(self.arity)
+        #return 0 # As we are not introducing new parameters right?
+        return 0.0
 
     def move_params(self, int node):
         cdef int s, p, parstates, aggstate
@@ -376,17 +526,17 @@ cdef class BayesNetCPD(BayesNet):
         cdef Factor fac = self.fg.factor(node)
         cdef map[Var, size_t] state
 
-        print "### oldfac"
-        print crepr(fac)
-
         std = 0.3
         cdef VarSet parents = fac.vars()
         parents.erase(self.pnodes[node])
-        print "\tparents: "
-        print crepr(parents)
-
         parstates = dai.BigInt_size_t(parents.nrStates())
-        print "\tnumparentstates: %d" % parstates
+
+        IF DEBUG: 
+            print "### oldfac"
+            print crepr(fac)
+            print "\tparents: "
+            print crepr(parents)
+            print "\tnumparentstates: %d" % parstates
 
         arity = self.states[node]
 
@@ -398,20 +548,23 @@ cdef class BayesNetCPD(BayesNet):
             #oldval = fac.get(aggstate)
             #a,b = -oldval/std, (1-oldval)/std
             #newval = st.truncnorm.rvs(a,b,loc=oldval, scale=std)
+
             for s in range(arity):
                 state[self.pnodes[node]] = s
                 aggstate = dai.calcLinearState(fac.vars(), state)
 
                 fac.set(aggstate, newval[s])
 
-        print "### newfac"
-        print crepr(fac)
-        print ""
-        print "### oldfg"
-        print crepr(self.fg)
+        IF DEBUG:
+            print "### newfac"
+            print crepr(fac)
+            print ""
+            print "### oldfg"
+            print crepr(self.fg)
+            print "### newfg"
+            print crepr(self.fg)
+
         self.fg.setFactor(node, fac, True)
-        print "### newfg"
-        print crepr(self.fg)
 
         return 0.0
 
@@ -421,5 +574,6 @@ cdef class BayesNetCPD(BayesNet):
     def restore_backups(self):
         self.fg.restoreFactors()
 
-        return scheme
+    def __repr__(self):
+        return (crepr(self.fg))
 

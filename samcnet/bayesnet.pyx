@@ -26,19 +26,19 @@ cdef class BayesNet:
         template: A matrix of doubles \in[0,1.0] giving strength to the various connections
         Initializes the BayesNet as a set of independent nodes
         """
-        self.nodes = np.arange(states.shape[0], dtype=np.int)
         self.states = np.asarray(states,dtype=np.int32)
+        self.nodes = np.arange(self.states.shape[0], dtype=np.int)
         self.data = np.asarray(data,dtype=np.int32)
 
         self.graph = nx.DiGraph()
         self.graph.add_nodes_from(self.nodes)
 
-        self.limparent = 4
+        self.limparent = 3
         self.prior_alpha = 1.0
         self.prior_gamma = priorweight
 
-        self.data_num = data.shape[0]
-        self.node_num = data.shape[1]
+        self.data_num = self.data.shape[0]
+        self.node_num = self.states.shape[0]
 
         # Template and Ground truth networks
         if template == None:

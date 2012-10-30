@@ -18,7 +18,8 @@ from utils import getHost
 
 formatter = logging.Formatter('%(name)s: samc %(levelname)s %(message)s')
 
-h = logging.handlers.SysLogHandler(('knight-server.dyndns.org',10514))
+#h = logging.handlers.SysLogHandler(('knight-server.dyndns.org',10514))
+h = logging.handlers.SysLogHandler(('camdi16.tamu.edu',10514))
 h.setLevel(logging.INFO)
 h.setFormatter(formatter)
 
@@ -60,15 +61,18 @@ def sample(states, data, ground, template=None, iters=1e4, priorweight=1.0, burn
     nodes = np.arange(data.shape[1])
 
     b = BayesNetCPD(states, data, template, priorweight)
-    if isinstance(ground, nx.DiGraph):
-        ground = np.asarray(nx.to_numpy_matrix(ground), dtype=np.int32)
-        np.fill_diagonal(ground, 1)
-    elif isinstance(ground, JointDistribution):
-        ground = GroundNet(ground)
+    #if isinstance(ground, nx.DiGraph):
+        #ground = np.asarray(nx.to_numpy_matrix(ground), dtype=np.int32)
+        #np.fill_diagonal(ground, 1)
+    #elif isinstance(ground, JointDistribution):
+        #ground = GroundNet(ground)
+
+    ground = BayesNetCPD(states, np.array([]))
+
     s = SAMCRun(b,ground,burn,stepscale)
 
     t1 = time()
-    s.sample(iters, temperature)
+    detail = s.sample(iters, temperature)
     t2 = time()
     logger.info("SAMC run took %f seconds." , (t2-t1))
     return b,s
@@ -77,7 +81,8 @@ logger.info("Beginning Job")
 
 if 'SAMC_JOB' in os.environ and 'WORKHASH' in os.environ:
     import redis
-    r = redis.StrictRedis('knight-server.dyndns.org')
+    #r = redis.StrictRedis('knight-server.dyndns.org')
+    r = redis.StrictRedis('camdi16.tamu.edu')
 
     ########## Read config from driver.py ########
     config = js.loads(os.environ['SAMC_JOB'])
@@ -92,7 +97,7 @@ if 'SAMC_JOB' in os.environ and 'WORKHASH' in os.environ:
     experiment = config.get('experiment_type', 'single')
     method = config.get('gen_method', 'dirichlet')
     noise = config.get('noise', 0.0)
-    truncate = config.get('truncate', 3)
+    truncate = config.get('truncate', None)
 
     if 'graph' in config:
         assert 'seed' in config, "Seed not in configuration."
@@ -150,8 +155,8 @@ elif __name__ == '__main__':
         #logging.critical('test %d', np.random.randint(1000))
         #x = 1/0
         #sys.exit()
-        N = 5
-        iters = 1e5
+        N = 45
+        iters = 2e5
         numdata = 50
         priorweight = 5
         numtemplate = 5
@@ -182,7 +187,7 @@ elif __name__ == '__main__':
 
         ###############################################
         b,s = sample(states1, d1, joint1, template=t1,
-                iters=iters, priorweight=priorweight, burn=0, stepscale=10000, temperature=10)
+                iters=iters, priorweight=priorweight, burn=0, stepscale=30000, temperature=10)
 
         #es = []
         #newes = []

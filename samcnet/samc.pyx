@@ -115,7 +115,7 @@ cdef class SAMCRun:
         else:
             numerator = (part * self.db['funcs']).sum()
         denom = part.sum()
-        print "Calculating function mean: %g / %g = %g." % (numerator, denom, numerator/denom)
+        #print "Calculating function mean: %g / %g = %g." % (numerator, denom, numerator/denom)
         return numerator / denom
 
     cdef find_region(self, energy):
@@ -149,10 +149,14 @@ cdef class SAMCRun:
         scheme_detail[2] = [0]*2
         scheme_detail[3] = [0]*2
 
+
         dbsize = self.iteration + int(iters) - self.burn
         if dbsize < 0:
             dbsize = 0
         self.db = self.obj.init_db(self.db, dbsize)
+        
+        func_detail = np.empty(dbsize/100, dtype=np.double)
+                
         print("Initial Energy: %g" % oldenergy)
         #fid = open("rlogpy2",'w')
 
@@ -221,6 +225,9 @@ cdef class SAMCRun:
                 print("Iteration: %8d, delta: %5.2f, best energy: %7g, current energy: %7g" % \
                         (self.iteration, self.delta, self.mapenergy, newenergy))
 
+            if self.iteration % 100 == 0:
+                func_detail[current_iter/100] = self.estimate_func_mean()
+
         self.hist[1] = hist
         self.indicator = indicator
 
@@ -229,5 +236,5 @@ cdef class SAMCRun:
         print("Total_loc: %d" % self.total_loc)
         print("Acceptance: %f" % (float(self.accept_loc)/float(self.total_loc)))
 
-        return scheme_detail
+        return func_detail
 

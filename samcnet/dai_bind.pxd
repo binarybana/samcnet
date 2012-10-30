@@ -34,6 +34,8 @@ cdef extern from "dai/varset.h" namespace "dai":
         vector[Var].iterator end()
         VarSet& insert(Var &)
         VarSet& erase(Var &)
+        VarSet operator/(VarSet &)
+        VarSet operator|(VarSet &)
         #VarSet& remove(VarSet &)
         #VarSet& add(VarSet &)
 
@@ -54,6 +56,7 @@ cdef extern from "dai/factor.h" namespace "dai":
         T entropy()
         TFactor[T] marginal(VarSet &)
         TFactor[T] embed(VarSet &)
+        T operator[](size_t)
         T normalize()
 
 ctypedef TFactor[double] Factor
@@ -64,14 +67,18 @@ cdef extern from "dai/factorgraph.h" namespace "dai":
         FactorGraph(vector[Factor] &)
         Var & var(size_t)
         FactorGraph* clone()
+        size_t nrVars()
+        size_t nrFactors()
+        size_t nrEdges()
         double logScore(vector[long unsigned int] &)
         Factor factor(int)
-        void setFactor(int, Factor, bool)
-        void clearBackups()
-        void restoreFactors()
+        void setFactor(int, Factor, bool) except +
+        void clearBackups() except +
+        void restoreFactors() except +
 
 cdef extern from "dai/jtree.h" namespace "dai":
     cdef cppclass JTree:
+        JTree()
         JTree(FactorGraph &, PropertySet &)
         void init()
         void run()
