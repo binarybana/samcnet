@@ -1,6 +1,7 @@
 import sys, os, io
 import sha
 import numpy as np
+import scipy as sp
 import networkx as nx
 import traceback
 import functools
@@ -13,37 +14,11 @@ from time import time, sleep
 import random
 import logging
 import logging.handlers
-from probability import GroundNet, JointDistribution
 from utils import getHost
-
-formatter = logging.Formatter('%(name)s: samc %(levelname)s %(message)s')
-
-#h = logging.handlers.SysLogHandler(('knight-server.dyndns.org',10514))
-h = logging.handlers.SysLogHandler(('camdi16.tamu.edu',10514))
-h.setLevel(logging.INFO)
-h.setFormatter(formatter)
-
-#logger = logging.getLogger('hbclient')
-logger = logging.getLogger(getHost() + ' child ' + str(os.getpid()))
-#logger = logging.getLogger(__name__)
-
-hstream = logging.StreamHandler()
-hstream.setLevel(logging.INFO)
-hstream.setFormatter(formatter)
-
-logger.addHandler(hstream)
-logger.addHandler(h)
-logger.setLevel(logging.DEBUG)
 
 sys.path.append('build') # Yuck!
 sys.path.append('.')
 sys.path.append('lib')
-
-def log_uncaught_exceptions(ex_cls, ex, tb):
-    logger.critical(''.join(traceback.format_tb(tb)))
-    logger.critical('{0}: {1}'.format(ex_cls, ex))
-
-sys.excepthook = log_uncaught_exceptions
 
 try:
     from samc import SAMCRun
@@ -61,14 +36,7 @@ def sample(states, data, ground, template=None, iters=1e4, priorweight=1.0, burn
     nodes = np.arange(data.shape[1])
 
     b = BayesNetCPD(states, data, template, priorweight)
-    #if isinstance(ground, nx.DiGraph):
-        #ground = np.asarray(nx.to_numpy_matrix(ground), dtype=np.int32)
-        #np.fill_diagonal(ground, 1)
-    #elif isinstance(ground, JointDistribution):
-        #ground = GroundNet(ground)
-
     ground = BayesNetCPD(states, np.array([]))
-
     s = SAMCRun(b,ground,burn,stepscale)
 
     t1 = time()
@@ -77,12 +45,40 @@ def sample(states, data, ground, template=None, iters=1e4, priorweight=1.0, burn
     logger.info("SAMC run took %f seconds." , (t2-t1))
     return b,s
 
-logger.info("Beginning Job")
 
 if 'SAMC_JOB' in os.environ and 'WORKHASH' in os.environ:
+    try:
+        syslog_server = os.environ['SYSLOG']
+        redis_server = os.environ['REDIS']
+    except:
+        print "ERROR in worker: Need SYSLOG and REDIS environment variables defined."
+        sys.exit(1)
+
+    formatter = logging.Formatter('%(name)s: samc %(levelname)s %(message)s')
+
+    h = logging.handlers.SysLogHandler((syslog_server,10514))
+    h.setLevel(logging.INFO)
+    h.setFormatter(formatter)
+
+    logger = logging.getLogger(getHost() + '-worker-' + str(os.getpid()))
+
+    hstream = logging.StreamHandler()
+    hstream.setLevel(logging.INFO)
+    hstream.setFormatter(formatter)
+
+    logger.addHandler(hstream)
+    logger.addHandler(h)
+    logger.setLevel(logging.DEBUG)
+
+    def log_uncaught_exceptions(ex_cls, ex, tb):
+        logger.critical(''.join(traceback.format_tb(tb)))
+        logger.critical('{0}: {1}'.format(ex_cls, ex))
+
+    sys.excepthook = log_uncaught_exceptions
+    logger.info("Beginning Job")
+
     import redis
-    #r = redis.StrictRedis('knight-server.dyndns.org')
-    r = redis.StrictRedis('camdi16.tamu.edu')
+    r = redis.StrictRedis(redis_server)
 
     ########## Read config from driver.py ########
     config = js.loads(os.environ['SAMC_JOB'])
@@ -155,8 +151,8 @@ elif __name__ == '__main__':
         #logging.critical('test %d', np.random.randint(1000))
         #x = 1/0
         #sys.exit()
-        N = 45
-        iters = 2e5
+        N = 5
+        iters = 1e4
         numdata = 50
         priorweight = 5
         numtemplate = 5

@@ -1,20 +1,29 @@
-import sys, os
-import redis
+import sys
+import os
 import sha
 import atexit
+import traceback
+import logging
+import logging.handlers
 import subprocess as sb
 from time import time, sleep
-import traceback
+import uuid
 try:
     import simplejson as js
 except:
     import json as js
-import logging
-import logging.handlers
+
+import redis
 from utils import getHost
 
-#h = logging.handlers.SysLogHandler(('knight-server.dyndns.org',10514))
-h = logging.handlers.SysLogHandler(('camdi16.tamu.edu',10514))
+try:
+    syslog_server = os.environ['SYSLOG']
+    redis_server = os.environ['REDIS']
+except:
+    print "ERROR: Need SYSLOG and REDIS environment variables defined."
+    sys.exit(1)
+
+h = logging.handlers.SysLogHandler((syslog_server,10514))
 h.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(name)s: samc %(levelname)s %(message)s')
 h.setFormatter(formatter)
@@ -75,8 +84,7 @@ if __name__ == '__main__':
         sys.exit()
     else:
         logger.info('Connecting to db.')
-        #r = redis.StrictRedis('knight-server.dyndns.org')
-        r = redis.StrictRedis('camdi16.tamu.edu')
+        r = redis.StrictRedis(redis_server)
         atexit.register(recordDeath)
         capacity = int(sys.argv[1])
         children = [None] * capacity

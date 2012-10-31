@@ -3,12 +3,17 @@ import os, sys, shlex, time, sha
 import subprocess as sb
 import redis
 import simplejson as js
-from samcnet.server_configs import cfg
+from config import cfg
 
 LocalRoot = cfg['local_root']
+syncgroups = cfg['sync_groups']
+serverconfigs = cfg['server_configs']
 
 def launchClient(host):
     cores = host.cores
+    env = {}
+    env['REDIS'] = cfg['redis_server']
+    env['SYSLOG'] = cfg['syslog_server']
     if host.cde:
         spec = ('ssh {0.hostname} cd {0.root}/cde-package/cde-root/' \
                 + 'home/bana/GSP/research/samc/code; ').format(host) \
@@ -20,7 +25,8 @@ def launchClient(host):
 
     print "Connecting to %s." % host.hostname
     p = sb.Popen(shlex.split(spec), 
-            bufsize=-1)
+            bufsize=-1,
+            env=env)
             #stdout=open('/tmp/samc-{0.hostname}-{1}.log'.format(host, random.randint(0,1e9)) ,'w'))
     return 
 
@@ -48,6 +54,8 @@ def updateCDE():
     print "Updating CDE package..." 
     os.environ['LD_LIBRARY_PATH']='build:lib'
     os.environ['PYTHONPATH']=LocalRoot
+    os.environ['REDIS'] = cfg['redis_server']
+    os.environ['SYSLOG'] = cfg['syslog_server']
     os.chdir(LocalRoot)
     #p = sb.Popen('/home/bana/bin/cde python {0}/samcnet/driver.py rebuild'.format(LocalRoot).split())
     p = sb.Popen('/home/bana/bin/cde python -m samcnet.driver rebuild'.split())
@@ -150,7 +158,7 @@ if __name__ == '__main__':
 
     goal = sys.argv[1]
 
-    r = redis.StrictRedis(cfg_redis_server)
+    r = redis.StrictRedis(cfg['redis_server'])
 
     if goal == 'sync':
         assert sys.argv[2] in syncgroups

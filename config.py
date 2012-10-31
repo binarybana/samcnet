@@ -5,8 +5,11 @@ ServerConfig = namedtuple('ServerConfig', 'hostname root python cde cores')
 SyncGroup = namedtuple('SyncGroup', 'hostname dir cde')
 ########################################
 
+cfg = {}
+
 ### Define local redis server, local root, sync groups and servers ###
 cfg['redis_server'] = "camdi16.tamu.edu"
+cfg['syslog_server'] = "camdi16.tamu.edu"
 cfg['local_root'] = '/home/bana/GSP/research/samc/code'
 
 #cfg['sync_groups'] = {'cesg': SyncGroup('raptor', '/home/bana', True),
