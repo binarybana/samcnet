@@ -20,19 +20,16 @@ sys.path.append('build') # Yuck!
 sys.path.append('.')
 sys.path.append('lib')
 
-try:
-    from samc import SAMCRun
-    from bayesnet import BayesNet
-    from bayesnetcpd import BayesNetCPD
-    from generator import *
-except ImportError as e:
-    logger.critical(e)
-    logger.critical(sys.path)
-    logger.critical("Make sure LD_LIBRARY_PATH is set correctly and that the build"+\
-            " directory is populated by waf.")
-    sys.exit()
+def sample(states, 
+        data, 
+        ground, 
+        template=None, 
+        iters=1e4, 
+        priorweight=1.0, 
+        burn=100000, 
+        stepscale=10000, 
+        temperature = 1.0):
 
-def sample(states, data, ground, template=None, iters=1e4, priorweight=1.0, burn=100000, stepscale=10000, temperature = 1.0):
     nodes = np.arange(data.shape[1])
 
     b = BayesNetCPD(states, data, template, priorweight)
@@ -42,16 +39,21 @@ def sample(states, data, ground, template=None, iters=1e4, priorweight=1.0, burn
     t1 = time()
     detail = s.sample(iters, temperature)
     t2 = time()
-    logger.info("SAMC run took %f seconds." , (t2-t1))
+    #logger.info("SAMC run took %f seconds." , (t2-t1))
     return b,s
 
 
-if 'SAMC_JOB' in os.environ and 'WORKHASH' in os.environ:
+if __name__ == '__main__':
     try:
         syslog_server = os.environ['SYSLOG']
-        redis_server = os.environ['REDIS']
     except:
-        print "ERROR in worker: Need SYSLOG and REDIS environment variables defined."
+        print "ERROR in worker: Need SYSLOG environment variable defined."
+        sys.exit(1)
+    try:
+        if 'WORKHASH' in os.environ:
+            redis_server = os.environ['REDIS']
+    except:
+        print "ERROR in worker: Need REDIS environment variable defined."
         sys.exit(1)
 
     formatter = logging.Formatter('%(name)s: samc %(levelname)s %(message)s')
@@ -77,65 +79,22 @@ if 'SAMC_JOB' in os.environ and 'WORKHASH' in os.environ:
     sys.excepthook = log_uncaught_exceptions
     logger.info("Beginning Job")
 
-    import redis
-    r = redis.StrictRedis(redis_server)
+    try:
+        from samc import SAMCRun
+        from bayesnet import BayesNet
+        from bayesnetcpd import BayesNetCPD
+        from generator import *
+    except ImportError as e:
+        logger.critical(e)
+        logger.critical(sys.path)
+        logger.critical("Make sure LD_LIBRARY_PATH is set correctly and that the build"+\
+                " directory is populated by waf.")
+        sys.exit()
 
-    ########## Read config from driver.py ########
-    config = js.loads(os.environ['SAMC_JOB'])
+    if 'WORKHASH' in os.environ:
+        import redis
+        r = redis.StrictRedis(redis_server)
 
-    N = config['nodes']
-    iters = config['samc_iters']
-    numdata = config['numdata']
-    priorweight = config['priorweight']
-    numtemplate = config['numtemplate']
-    burn = config.get('burn', 100000)
-    stepscale = config.get('stepscale', 10000)
-    experiment = config.get('experiment_type', 'single')
-    method = config.get('gen_method', 'dirichlet')
-    noise = config.get('noise', 0.0)
-    truncate = config.get('truncate', None)
-
-    if 'graph' in config:
-        assert 'seed' in config, "Seed not in configuration."
-        ngraph = np.fromstring(config['graph'], dtype=np.int32)
-        ngraph = ngraph.reshape(int(np.sqrt(ngraph.size)), int(np.sqrt(ngraph.size)))
-        #logger.debug('Graph adjacency matrix: %s', str(ngraph))
-        graph = nx.from_numpy_matrix(ngraph, create_using=nx.DiGraph())
-        random.seed(config['seed'])
-        np.random.seed(config['seed'])
-        _,_,joint = generateData(graph, 10, noise=noise, method=method) # 1000 because we need
-        # to generate the CPDs deterministically
-        random.seed()
-        np.random.seed()
-        data,states,_ = generateData(graph, numdata, noise=noise, joint=joint, method=method)
-    else:
-        graph = generateHourGlassGraph(nodes=N)
-        data, states, joint = generateData(graph,numdata,noise=noise,method=method)
-
-    if experiment == 'single':
-        if numtemplate == 0:
-            b,s = sample(states, data, joint, template=None, iters=iters, burn=burn, stepscale=stepscale)
-        else:
-            template = sampleTemplate(graph, numtemplate)
-            b,s = sample(states, data, joint, template, iters, burn=burn, stepscale=stepscale)
-
-        mean = s.estimate_func_mean(truncate)
-        r.lpush(os.environ['WORKHASH'], mean)
-        print('Mean estimation: %f' % mean)
-
-    if experiment == 'difference':
-        b,s = sample(states, data, joint, template=None, iters=iters, burn=burn)
-        mean1 = s.estimate_func_mean(truncate)
-        template = sampleTemplate(graph, numtemplate)
-        b,s = sample(states, data, joint, template=template, iters=iters, burn=burn)
-        mean2 = s.estimate_func_mean(truncate)
-    
-        # Send back func_mean to store
-        r.lpush(os.environ['WORKHASH'], mean1 - mean2)
-        print('Function difference: %f' % (mean1 - mean2))
-
-elif __name__ == '__main__':
-    from utils import *
     if False: #WBCD Data
         iters = 3e5
         data = np.loadtxt('data/WBCD2.dat', np.int)
@@ -147,10 +106,6 @@ elif __name__ == '__main__':
 
     if True:
 
-        #import pstats, cProfile, statprof
-        #logging.critical('test %d', np.random.randint(1000))
-        #x = 1/0
-        #sys.exit()
         N = 5
         iters = 1e4
         numdata = 50
@@ -161,11 +116,12 @@ elif __name__ == '__main__':
         np.random.seed(123456)
 
         g1 = generateHourGlassGraph(nodes=N)
+        #print sp.version.version
 
         #d1, states1, joint1 = generateData(g1,numdata,method='noisylogic')
         d1, states1, joint1 = generateData(g1,numdata,method='dirichlet')
-        print "Ground joint: \n", joint1
-        print "Effective sample size: %d" % len(set(map(tuple,d1)))
+        #print "Ground joint: \n", joint1
+        #print "Effective sample size: %d" % len(set(map(tuple,d1)))
 
         t1 = sampleTemplate(g1, numtemplate)
 
@@ -184,6 +140,10 @@ elif __name__ == '__main__':
         ###############################################
         b,s = sample(states1, d1, joint1, template=t1,
                 iters=iters, priorweight=priorweight, burn=0, stepscale=30000, temperature=10)
+    if 'WORKHASH' in os.environ:
+        mean = s.estimate_func_mean()
+        r.lpush('jobs:done:'+os.environ['WORKHASH'], mean)
+
 
         #es = []
         #newes = []
@@ -204,5 +164,4 @@ elif __name__ == '__main__':
 
         #print('Global edge error: %f' % mean1)
         #print('Map edge error: %f' % val1)
-
 
