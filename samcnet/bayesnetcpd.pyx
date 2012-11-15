@@ -521,7 +521,7 @@ cdef class BayesNetCPD(BayesNet):
         return 0.0
 
     def move_params(self, int node):
-        cdef int s, p, parstates, aggstate
+        cdef int s, p, parstates, aggstate, arity
         cdef double oldval, a, b, std
         cdef Factor fac = self.fg.factor(node)
         cdef map[Var, size_t] state
@@ -531,6 +531,7 @@ cdef class BayesNetCPD(BayesNet):
         parents.erase(self.pnodes[node])
         parstates = dai.BigInt_size_t(parents.nrStates())
 
+
         IF DEBUG: 
             print "### oldfac"
             print crepr(fac)
@@ -539,9 +540,10 @@ cdef class BayesNetCPD(BayesNet):
             print "\tnumparentstates: %d" % parstates
 
         arity = self.states[node]
+        alpha = np.ones(arity)
 
         for p in range(parstates):
-            newval = np.random.dirichlet(np.ones(arity))
+            newval = np.random.dirichlet(alpha)
             state = dai.calcState(parents, p)
             # we could get this newval closer to the oldval by changing the 
             # alpha values...
