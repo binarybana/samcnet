@@ -125,7 +125,7 @@ def logp_normal(x, mu, sigma, nu=1.0):
 
 class Classification():
     def __init__(self):
-        #np.random.seed(1234)
+        np.random.seed(1234)
         self.D = 2 # Dimension
         self.N = 30 # Data points
         self.DOF = 3 # For random ground truth COV mats
@@ -276,9 +276,9 @@ class Classification():
         else:
             raise Exception("DB Not inited")
 
-    def save_to_db(self, db, theta, energy, i, ground):
+    def save_to_db(self, db, theta, energy, iteration):
         func = 0.0
-        db[i] = np.array([theta, energy, func])
+        db[iteration] = np.array([theta, energy, func])
         global mydb
         mydb.append(self.copy())
 
@@ -345,17 +345,17 @@ if __name__ == '__main__':
     c.propose()
     print c.energy()
     c.reject()
-    print c.energy()
+    #print c.energy()
     #c.propose()
     #for i in range(50):
         #c.propose()
     #c.reject()
     #c.energy()
 
-    s = samc.SAMCRun(c, burn=0, stepscale=1000)
+    s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=2)
     p.close('all')
     #s = MHRun(c, burn=0)
-    s.sample(2e3)
+    s.sample(2e4)
     plotrun(c,mydb)
     p.show()
 

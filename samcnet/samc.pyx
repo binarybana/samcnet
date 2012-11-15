@@ -11,10 +11,10 @@ cimport numpy as np
 
 cdef class SAMCRun:
     cdef public:
-        object obj, db, refden, hist, mapvalue, ground
+        object obj, db, refden, hist, mapvalue
         int lowEnergy, highEnergy, grid, accept_loc, total_loc, iteration, burn, stepscale
-        double rho, tau, mapenergy, delta, scale
-    def __init__(self, obj, ground=None, burn=100000, stepscale = 10000):
+        double rho, tau, mapenergy, delta, scale, refden_slope
+    def __init__(self, obj, burn=100000, stepscale = 10000, refden=0.0):
 
         self.obj = obj # Going to be a BayesNet for now, but we'll keep it general
         self.clear()
@@ -27,8 +27,7 @@ cdef class SAMCRun:
 
         self.burn = burn
         self.stepscale = stepscale
-
-        self.ground = ground
+        self.refden_slope = refden
 
     def set_energy_limits(self):
         cdef int i
@@ -72,9 +71,7 @@ cdef class SAMCRun:
 
         self.grid = <int>ceil((self.highEnergy - self.lowEnergy) / self.scale)
 
-        #self.refden = np.arange(self.grid, 0, -1, dtype=np.double)
-        #self.refden = self.refden**2
-        self.refden = np.ones(self.grid, dtype=np.double)
+        self.refden = np.arange(self.grid, 0, -1, dtype=np.double)**self.refden_slope
         self.refden /= self.refden.sum()
 
         self.hist = np.zeros((3,self.grid), dtype=np.double)
@@ -188,8 +185,7 @@ cdef class SAMCRun:
                 self.obj.save_to_db(self.db, 
                         hist[oldregion], 
                         oldenergy, 
-                        current_iter-self.burn, 
-                        self.ground)
+                        current_iter-self.burn)
 
             if self.iteration % 10000 == 0:
                 print("Iteration: %8d, delta: %5.2f, best energy: %7g, current energy: %7g" % \

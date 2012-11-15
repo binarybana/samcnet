@@ -34,7 +34,7 @@ def sample(states,
 
     b = BayesNetCPD(states, data, template, priorweight)
     ground = BayesNetCPD(states, np.array([]))
-    s = SAMCRun(b,ground,burn,stepscale)
+    s = SAMCRun(b,burn,stepscale)
 
     t1 = time()
     detail = s.sample(iters, temperature)

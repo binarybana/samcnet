@@ -58,7 +58,7 @@ cdef class BayesNetCPD(BayesNet):
         self.memo_entropy = 0.0
         self.dirty = True
     
-    def __init__(self, states, data, intemplate=None, priorweight=1.0):
+    def __init__(self, states, data, intemplate=None, priorweight=1.0, ground=None):
         cdef int i, j
         nodes = np.arange(states.shape[0])
         BayesNet.__init__(self, states, data, intemplate, priorweight)
@@ -70,6 +70,7 @@ cdef class BayesNetCPD(BayesNet):
             facvector.push_back(Factor(self.pnodes.back()))
 
         self.fg = FactorGraph(facvector)
+        self.ground = ground
 
         self.logqfactor = 0.0
         #self.memo_table = MemoCounter(data)
@@ -104,11 +105,13 @@ cdef class BayesNetCPD(BayesNet):
     def copy(self):
         return (self.mat.copy(), self.x.copy(), 0 )# self.fg.clone()) # need to wrap this
 
-    def save_to_db(BayesNetCPD self, object db, \
-            double theta, double energy, int i, BayesNetCPD ground_truth):
-        func = ground_truth.kld(self)
+    def save_to_db(BayesNetCPD self, object db, double theta, double energy, int iteration):
+        if self.ground:
+            func = self.ground.kld(self)
+        else:
+            func = 0.0
         assert db is not None, 'DB None when trying to save sample.'
-        db[i] = np.array([theta, energy, func])
+        db[iteration] = np.array([theta, energy, func])
 
     #@cython.boundscheck(False)
     def energy(self):
