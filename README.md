@@ -19,3 +19,17 @@ This software would not be possible without the following components:
 - [Redis](http://redis.io) for the distributed job management
 - [waf](http://code.google.com/p/waf/) for the build system
 - rsyslog for remote logging
+
+## TODO
+
+1. Estimate class conditional density by
+    1. Discretizing space
+    2. Weighted SAMC average sample densities at each point
+2. Find decision boundary. I think it's enough to:
+    1. Wrap these effective densities in an interpolation function
+    2. Numerically find the intersection between the two classes effective 
+       densities for a predetermined set of x (or y) values.
+3. Then calculate the analytical boundary using Lori's methods
+    1. Plot the two on top of each other
+    2. Quantify the difference? Could do this using true error using the known 
+       ground truth densities.
