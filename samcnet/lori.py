@@ -123,7 +123,7 @@ def logp_normal(x, mu, sigma, nu=1.0):
 
 class Classification():
     def __init__(self):
-        np.random.seed(1)
+        np.random.seed(123)
         self.D = 2 # Dimension
         self.N = 30 # Data points
         self.DOF = 3 # For random ground truth COV mats
@@ -148,20 +148,17 @@ class Classification():
         self.gavg = np.zeros((self.grid_n, self.grid_n))
         self.numgavg = 0
 
-
-
-        count = st.binom.rvs(self.N, c)
+        self.count = st.binom.rvs(self.N, c)
         self.data = np.vstack(( \
-            np.random.multivariate_normal(mu0, sigma0, count),
-            np.random.multivariate_normal(mu1, sigma1, self.N-count) ))
+            np.random.multivariate_normal(mu0, sigma0, self.count),
+            np.random.multivariate_normal(mu1, sigma1, self.N-self.count) ))
 
         self.mask = np.hstack((
-            np.zeros(count, dtype=np.bool),
-            np.ones(self.N-count, dtype=np.bool)))
+            np.zeros(self.count, dtype=np.bool),
+            np.ones(self.N-self.count, dtype=np.bool)))
 
         ##### Record true values for plotting, comparison #######
         self.true = {'c':c, 
-                'count' : count,
                 'mu0': mu0, 
                 'sigma0': sigma0, 
                 'mu1': mu1, 
@@ -298,13 +295,17 @@ class Classification():
         else:
             raise Exception("DB Not inited")
 
-    def save_to_db(self, db, theta, energy, iteration):
+    def save_to_db(self, db, theta, energy, iteration, blast):
         func = 0.0
         db[iteration] = np.array([theta, energy, func])
         global mydb
         mydb.append(self.copy())
 
         # Update G function average
+        # TODO: Need to test if MCMC is weighted (SAMC) and if it is, 
+        # then perform a weighted running average (is this possible with SAMC?)
+        # Perhaps we'll have to do this offline... because the weights are not
+        # fully known yet.
         self.numgavg += 1
         self.gavg += (self.calc_gfunc() - self.gavg) / self.numgavg
 
@@ -313,7 +314,7 @@ def plotrun(c, db):
     splot = p.subplot(2,2,1)
     p.title('Data')
     p.grid(True)
-    count = c.true['count']
+    count = c.count
     n = c.N
 
     p.plot(c.data[np.arange(count),0], c.data[np.arange(count),1], 'r.')
