@@ -148,13 +148,16 @@ class Classification():
         self.gavg = np.zeros((self.grid_n, self.grid_n))
         self.numgavg = 0
 
-        self.mask = np.zeros(self.N, dtype=np.bool)
 
 
         count = st.binom.rvs(self.N, c)
         self.data = np.vstack(( \
             np.random.multivariate_normal(mu0, sigma0, count),
             np.random.multivariate_normal(mu1, sigma1, self.N-count) ))
+
+        self.mask = np.hstack((
+            np.zeros(count, dtype=np.bool),
+            np.ones(self.N-count, dtype=np.bool)))
 
         ##### Record true values for plotting, comparison #######
         self.true = {'c':c, 
@@ -201,6 +204,10 @@ class Classification():
         self.oldsigma1 = None
         self.oldc = None
 
+    def calc_analytic(self):
+        self.nu0star = None
+
+
     def propose(self):
         self.oldmu0 = self.mu0.copy()
         self.oldmu1 = self.mu1.copy()
@@ -235,17 +242,17 @@ class Classification():
         # First calculate the labels from the Bayes classifier
         # this comes from page 21-22 of Lori's Optimal Bayes Classifier 
         # Part 1 Paper (eq 56).
-        s0i = np.linalg.inv(self.sigma0)
-        s1i = np.linalg.inv(self.sigma1)
-        A = -0.5 * (s1i - s0i)
-        a = np.dot(s1i,self.mu1) - np.dot(s0i,self.mu0)
-        b = -0.5 * np.dot(np.dot(self.mu1.T,s1i),self.mu1) \
-            - np.dot(np.dot(self.mu0.T,s0i),self.mu0) \
-            + np.log((1-self.c)/self.c \
-            * (np.linalg.det(self.sigma0)/np.linalg.det(self.sigma1))**0.5)
+        #s0i = np.linalg.inv(self.sigma0)
+        #s1i = np.linalg.inv(self.sigma1)
+        #A = -0.5 * (s1i - s0i)
+        #a = np.dot(s1i,self.mu1) - np.dot(s0i,self.mu0)
+        #b = -0.5 * np.dot(np.dot(self.mu1.T,s1i),self.mu1) \
+            #- np.dot(np.dot(self.mu0.T,s0i),self.mu0) \
+            #+ np.log((1-self.c)/self.c \
+            #* (np.linalg.det(self.sigma0)/np.linalg.det(self.sigma1))**0.5)
 
-        g = (np.dot(self.data, A) * self.data).sum(axis=1) \
-            + np.dot(self.data, a) + b
+        #g = (np.dot(self.data, A) * self.data).sum(axis=1) \
+            #+ np.dot(self.data, a) + b
 
         #clf = QDA()
         #clf.covariances_ = []
@@ -255,18 +262,14 @@ class Classification():
         #skpreds = clf.predict(self.data)
         #skscores = clf.predict_log_proba(self.data)
 
-        self.mask = g<=0
-
         sum = 0.0
-        k = self.D
-
         #class 0 negative log likelihood
-        points = self.data[g<=0]
+        points = self.data[np.logical_not(self.mask)]
         if points.size > 0:
             sum -= logp_normal(points, self.mu0, self.sigma0).sum()
 
         #class 1 negative log likelihood
-        points = self.data[g>0]
+        points = self.data[self.mask]
         if points.size > 0:
             sum -= logp_normal(points, self.mu1, self.sigma1).sum()
                 
@@ -393,7 +396,7 @@ if __name__ == '__main__':
     #p.colorbar()
     
     s = MHRun(c, burn=0)
-    s.sample(2e4)
+    s.sample(2e3)
     plotrun(c,mydb)
     p.show()
 
