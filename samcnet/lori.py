@@ -9,7 +9,7 @@ from math import log, exp, pi, lgamma
 import scipy.stats as st
 import scipy
 
-from sklearn.qda import QDA
+#from sklearn.qda import QDA
 
 import sys
 sys.path.append('/home/bana/GSP/research/samc/code')
@@ -55,7 +55,7 @@ class MHRun():
                 self.obj.reject()
 
             if i>self.burn and i%self.thin == 0:
-                self.obj.save_to_db(self.db, 0, oldenergy, i, None)
+                self.obj.save_to_db(self.db, 0, oldenergy, i)
 
             if oldenergy < minenergy:
                 minenergy = oldenergy
@@ -102,8 +102,8 @@ def logp_invwishart(mat, kappa, s):
             - D*(D-1)/4 * log(pi) * mlgamma
 
 def logp_normal(x, mu, sigma, nu=1.0):
-    ''' Return log probability from a multivariate normal with
-    scaling parameter nu, and prior mu priormu '''
+    ''' Return log probabilities from a multivariate normal with
+    scaling parameter nu, mean mu, and covariance matrix sigma.'''
     x = np.asarray(x)
     mu = np.asarray(mu)
     sigma = np.asarray(sigma)
@@ -116,16 +116,14 @@ def logp_normal(x, mu, sigma, nu=1.0):
     t2 = -0.5*log(np.linalg.det(sigma))
     t3 = - nu/2 * (np.dot((x-mu), np.linalg.inv(sigma)) \
             * (x-mu)).sum(axis=axis)
-    s = (t1+t2+t3).sum()
-    return s
-
+    return t1+t2+t3
     #return (-0.5*k*log(2*pi) - 0.5*log(np.linalg.det(sigma)) \
             #- nu/2* (np.dot((x-mu), np.linalg.inv(sigma)) \
             #* (x-mu)).sum(axis=axis)).sum()
 
 class Classification():
     def __init__(self):
-        np.random.seed(1234)
+        np.random.seed(1)
         self.D = 2 # Dimension
         self.N = 30 # Data points
         self.DOF = 3 # For random ground truth COV mats
@@ -139,6 +137,18 @@ class Classification():
 
         mu0 = np.zeros(self.D)
         mu1 = np.ones(self.D)
+
+        # For G function calculation and averaging
+        self.grid_n = 20
+        lx,hx,ly,hy = (-4,4,-4,4)
+        self.gextent = (lx,hx,ly,hy)
+        self.grid = np.dstack(np.meshgrid(
+                        np.linspace(lx,hx,self.grid_n),
+                        np.linspace(ly,hy,self.grid_n))).reshape(-1,2)
+        self.gavg = np.zeros((self.grid_n, self.grid_n))
+        self.numgavg = 0
+
+        self.mask = np.zeros(self.N, dtype=np.bool)
 
 
         count = st.binom.rvs(self.N, c)
@@ -223,6 +233,8 @@ class Classification():
 
     def energy(self):
         # First calculate the labels from the Bayes classifier
+        # this comes from page 21-22 of Lori's Optimal Bayes Classifier 
+        # Part 1 Paper (eq 56).
         s0i = np.linalg.inv(self.sigma0)
         s1i = np.linalg.inv(self.sigma1)
         A = -0.5 * (s1i - s0i)
@@ -243,27 +255,34 @@ class Classification():
         #skpreds = clf.predict(self.data)
         #skscores = clf.predict_log_proba(self.data)
 
+        self.mask = g<=0
+
         sum = 0.0
         k = self.D
 
         #class 0 negative log likelihood
         points = self.data[g<=0]
         if points.size > 0:
-            sum -= logp_normal(points, self.mu0, self.sigma0)
+            sum -= logp_normal(points, self.mu0, self.sigma0).sum()
 
         #class 1 negative log likelihood
         points = self.data[g>0]
         if points.size > 0:
-            sum -= logp_normal(points, self.mu1, self.sigma1)
+            sum -= logp_normal(points, self.mu1, self.sigma1).sum()
                 
         #Now add in the priors...
         # we'll assume uniform for class conditional (so we can ignore the
         # constant)
         sum -= logp_invwishart(self.sigma0,self.priorDOF0,self.priorsigma0)
         sum -= logp_invwishart(self.sigma1,self.priorDOF1,self.priorsigma1)
-        sum -= logp_normal(self.mu0, self.priormu0, self.sigma0, self.nu0)
-        sum -= logp_normal(self.mu1, self.priormu1, self.sigma1, self.nu1)
+        sum -= logp_normal(self.mu0, self.priormu0, self.sigma0, self.nu0).sum()
+        sum -= logp_normal(self.mu1, self.priormu1, self.sigma1, self.nu1).sum()
         return sum
+
+    def calc_gfunc(self):
+        gridenergies = logp_normal(self.grid, self.mu0, self.sigma0) * (self.c)
+        gridenergies -= logp_normal(self.grid, self.mu1, self.sigma1) * (1-self.c)
+        return gridenergies.reshape(self.grid_n,self.grid_n)
 
     def init_db(self, db, dbsize):
         dtype = [('thetas',np.double),
@@ -282,9 +301,13 @@ class Classification():
         global mydb
         mydb.append(self.copy())
 
+        # Update G function average
+        self.numgavg += 1
+        self.gavg += (self.calc_gfunc() - self.gavg) / self.numgavg
+
 def plotrun(c, db):
     # Plot the data
-    splot = p.subplot(1,2,1)
+    splot = p.subplot(2,2,1)
     p.title('Data')
     p.grid(True)
     count = c.true['count']
@@ -296,7 +319,7 @@ def plotrun(c, db):
     plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
     # Now plot the MCMC run
-    splot = p.subplot(1,2,2, sharex=splot, sharey=splot)
+    splot = p.subplot(2,2,2, sharex=splot, sharey=splot)
     p.grid(True)
     p.title('MCMC Mean Samples')
 
@@ -310,6 +333,16 @@ def plotrun(c, db):
     p.plot(means[0], means[1], 'ro', markersize=10)
     p.plot(means[2], means[3], 'go', markersize=10)
 
+    splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
+    p.imshow(c.gavg, extent=c.gextent, origin='lower')
+    p.colorbar()
+
+    p.contour(c.gavg, [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
+
+    p.plot(c.data[np.arange(count),0], c.data[np.arange(count),1], 'r.')
+    p.plot(c.data[np.arange(count,c.N),0], c.data[np.arange(count,c.N),1], 'g.')
+    plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+    plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
 def plot_ellipse(splot, mean, cov, color):
     v, w = np.linalg.eigh(cov)
@@ -352,9 +385,14 @@ if __name__ == '__main__':
     #c.reject()
     #c.energy()
 
-    s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=2)
+    #s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=2)
+
     p.close('all')
-    #s = MHRun(c, burn=0)
+    
+    #p.imshow(c.calc_gfunc(), origin='lower')
+    #p.colorbar()
+    
+    s = MHRun(c, burn=0)
     s.sample(2e4)
     plotrun(c,mydb)
     p.show()
