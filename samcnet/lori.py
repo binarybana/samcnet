@@ -8,7 +8,9 @@ from math import log, exp, pi, lgamma
 
 import scipy.stats as st
 import scipy
+from scipy.special import betaln
 
+from statsmodels.sandbox.distributions.mv_normal import MVT
 #from sklearn.qda import QDA
 
 import sys
@@ -61,6 +63,10 @@ class MHRun():
                 minenergy = oldenergy
                 self.mapvalue = self.obj.copy()
                 self.mapenergy = oldenergy
+
+            if self.iteration%1e3 == 0:
+                p.plot(self.obj.gavg[10,:], 'b')
+                p.show()
 
             if self.iteration%1e3 == 0:
                 print "Iteration: %9d, best energy: %7f, current energy: %7f" \
@@ -123,20 +129,31 @@ def logp_normal(x, mu, sigma, nu=1.0):
 
 class Classification():
     def __init__(self):
-        np.random.seed(123)
-        self.D = 2 # Dimension
-        self.N = 30 # Data points
-        self.DOF = 3 # For random ground truth COV mats
-        c = 0.8 # Ground truth class marginal
+        np.random.seed(1234)
 
-        temp0 = sample_invwishart(np.eye(self.D), self.DOF)
-        temp1 = sample_invwishart(np.eye(self.D), self.DOF)
+        self.D = 2 # Dimension
+        self.n = 30 # Data points
+
+        #### Ground Truth Parameters 
+        DOF = 3 # For random ground truth COV mats
+        c = 0.83 # Ground truth class marginal
+
+        temp0 = sample_invwishart(np.eye(self.D), DOF)
+        temp1 = sample_invwishart(np.eye(self.D), DOF)
 
         sigma0 = np.dot(temp0.T,temp0)
         sigma1 = np.dot(temp1.T,temp1)
 
         mu0 = np.zeros(self.D)
         mu1 = np.ones(self.D)
+
+        ##### Record true values for plotting, comparison #######
+        self.true = {'c':c, 
+                'mu0': mu0, 
+                'sigma0': sigma0, 
+                'mu1': mu1, 
+                'sigma1': sigma1,
+                'dof': DOF}
 
         # For G function calculation and averaging
         self.grid_n = 20
@@ -146,42 +163,41 @@ class Classification():
                         np.linspace(lx,hx,self.grid_n),
                         np.linspace(ly,hy,self.grid_n))).reshape(-1,2)
         self.gavg = np.zeros((self.grid_n, self.grid_n))
+        self.fx0avg = np.zeros((self.grid_n, self.grid_n))
         self.numgavg = 0
 
-        self.count = st.binom.rvs(self.N, c)
+        self.n0 = st.binom.rvs(self.n, c)
+        self.n1 = self.n - self.n0
         self.data = np.vstack(( \
-            np.random.multivariate_normal(mu0, sigma0, self.count),
-            np.random.multivariate_normal(mu1, sigma1, self.N-self.count) ))
+            np.random.multivariate_normal(mu0, sigma0, self.n0),
+            np.random.multivariate_normal(mu1, sigma1, self.n1) ))
 
-        self.mask = np.hstack((
-            np.zeros(self.count, dtype=np.bool),
-            np.ones(self.N-self.count, dtype=np.bool)))
-
-        ##### Record true values for plotting, comparison #######
-        self.true = {'c':c, 
-                'mu0': mu0, 
-                'sigma0': sigma0, 
-                'mu1': mu1, 
-                'sigma1': sigma1}
+        self.mask0 = np.hstack((
+            np.ones(self.n0, dtype=np.bool),
+            np.zeros(self.n1, dtype=np.bool)))
+        self.mask1 = np.logical_not(self.mask0)
 
         ##### Proposal variances ######
         self.propdof = 50
         self.propmu = 0.3
 
         ##### Prior Values and Confidences ######
-        self.priorsigma0 = np.eye(self.D)
-        self.priorsigma1 = np.eye(self.D)
-        self.priorDOF0 = 10
-        self.priorDOF1 = 10
+        self.priorsigma0 = np.eye(self.D)*0.3
+        self.priorsigma1 = np.eye(self.D)*0.3
+        self.kappa0 = 6
+        self.kappa1 = 6
 
         self.priormu0 = np.zeros(self.D)
         self.priormu1 = np.ones(self.D)
 
-        self.nu0 = 1.0
-        self.nu1 = 1.0
+        self.nu0 = 12.0
+        self.nu1 = 2.0
+
+        self.alpha0 = 1.0
+        self.alpha1 = 1.0
 
         ######## Starting point of MCMC Run #######
-        # 'Cheat' by starting at the right spot... for now
+        # 'Cheat' by starting at the 'right' spot... for now
         self.c = c
         self.mu0 = mu0.copy()
         self.mu1 = mu1.copy()
@@ -190,8 +206,8 @@ class Classification():
         #self.c = np.random.rand()
         #self.mu0 = np.random.rand(self.D)
         #self.mu1 = np.random.rand(self.D)
-        #self.sigma0 = sample_invwishart(self.priorsigma0, self.priorDOF0)
-        #self.sigma1 = sample_invwishart(self.priorsigma1, self.priorDOF1)
+        #self.sigma0 = sample_invwishart(self.priorsigma0, self.kappa0)
+        #self.sigma1 = sample_invwishart(self.priorsigma1, self.kappa1)
 
         
         ###### Bookeeping ######
@@ -200,10 +216,52 @@ class Classification():
         self.oldsigma0 = None
         self.oldsigma1 = None
         self.oldc = None
+        self.oldlastenergy = None
 
-    def calc_analytic(self):
-        self.nu0star = None
+        self.lastenergy = -np.infty
 
+        #### Calculating the Analytic solution given on page 15 of Lori's 
+        #### Optimal Classification eq 34.
+        self.nu0star = self.nu0 + self.n0
+        self.nu1star = self.nu1 + self.n1
+
+        sample0mean = self.data[self.mask0].mean()
+        sample1mean = self.data[self.mask1].mean()
+        sample0cov = np.cov(self.data[self.mask0].T)
+        sample1cov = np.cov(self.data[self.mask1].T)
+
+        self.mu0star = (self.nu0*self.priormu0 + self.n0 * sample0mean) \
+                / (self.nu0 + self.n0)
+        self.mu1star = (self.nu1*self.priormu1 + self.n1 * sample1mean ) \
+                / (self.nu1 + self.n1)
+
+        self.kappa0star = self.kappa0 + self.n0
+        self.kappa1star = self.kappa1 + self.n1
+
+        self.S0star = self.priorsigma0 + (self.n0-1)*sample0cov + self.nu0*self.n0/(self.nu0+self.nu0)\
+                * np.outer((sample0mean - self.priormu0), (sample0mean - self.priormu0))
+        self.S1star = self.priorsigma1 + (self.n1-1)*sample1cov + self.nu1*self.n1/(self.nu1+self.nu1)\
+                * np.outer((sample1mean - self.priormu1), (sample1mean - self.priormu1))
+                
+        #### Now calculate effective class conditional densities from eq 55
+        #### page 21
+
+        self.fx0 = MVT(
+                self.mu0star, 
+                (self.nu0star+1)/(self.kappa0star-self.D+1)/self.nu0star * self.S0star, 
+                self.kappa0star - self.D + 1)
+        self.fx1 = MVT(
+                self.mu1star, 
+                (self.nu1star+1)/(self.kappa1star-self.D+1)/self.nu1star * self.S1star, 
+                self.kappa1star - self.D + 1)
+
+        # Expectation of C from page 3 eq. 1 using beta conjugate prior
+        self.Ec = (self.n0 + self.alpha0) / (self.n + self.alpha0 + self.alpha1)
+        self.analyticg = (self.fx0.logpdf(self.grid) \
+                - self.fx1.logpdf(self.grid)).reshape(self.grid_n, -1) \
+                + log(self.Ec) - log(1-self.Ec)
+
+        self.analyticfx0 = self.fx1.logpdf(self.grid).reshape(self.grid_n, -1)
 
     def propose(self):
         self.oldmu0 = self.mu0.copy()
@@ -211,22 +269,24 @@ class Classification():
         self.oldsigma0 = self.sigma0.copy()
         self.oldsigma1 = self.sigma1.copy()
         self.oldc = self.c
+        self.oldlastenergy = self.lastenergy
 
         self.mu0 += (np.random.rand(self.D)-0.5)*self.propmu
         self.mu1 += (np.random.rand(self.D)-0.5)*self.propmu
 
         self.sigma0 = sample_invwishart(self.sigma0*self.propdof, self.propdof)
         self.sigma1 = sample_invwishart(self.sigma1*self.propdof, self.propdof)
-        #self.sigma0 = np.dot(self.sigma0, sample_invwishart(np.eye(self.D)*100, 100))
-        #self.sigma1 = np.dot(self.sigma1, sample_invwishart(np.eye(self.D)*100, 100))
-        # TODO FIXME  temporarily commented these out
         
-        self.c = np.random.rand()
-
+        add = np.random.randn()*0.1
+        self.c += add
+        if self.c >= 1.0:
+            self.c -= self.c - 1 + 0.01
+        elif self.c <= 0.0:
+            self.c = abs(self.c) + 0.01
         return 0
 
     def copy(self):
-        return (self.mu0.copy(), self.mu1.copy(), self.sigma0.copy(), self.sigma1.copy())
+        return (self.mu0.copy(), self.mu1.copy(), self.sigma0.copy(), self.sigma1.copy(), self.c)
 
     def reject(self):
         self.mu0 = self.oldmu0.copy()
@@ -234,55 +294,49 @@ class Classification():
         self.sigma0 = self.oldsigma0.copy()
         self.sigma1 = self.oldsigma1.copy()
         self.c = self.oldc
+        self.lastenergy = self.oldlastenergy
 
     def energy(self):
-        # First calculate the labels from the Bayes classifier
-        # this comes from page 21-22 of Lori's Optimal Bayes Classifier 
-        # Part 1 Paper (eq 56).
-        #s0i = np.linalg.inv(self.sigma0)
-        #s1i = np.linalg.inv(self.sigma1)
-        #A = -0.5 * (s1i - s0i)
-        #a = np.dot(s1i,self.mu1) - np.dot(s0i,self.mu0)
-        #b = -0.5 * np.dot(np.dot(self.mu1.T,s1i),self.mu1) \
-            #- np.dot(np.dot(self.mu0.T,s0i),self.mu0) \
-            #+ np.log((1-self.c)/self.c \
-            #* (np.linalg.det(self.sigma0)/np.linalg.det(self.sigma1))**0.5)
-
-        #g = (np.dot(self.data, A) * self.data).sum(axis=1) \
-            #+ np.dot(self.data, a) + b
-
-        #clf = QDA()
-        #clf.covariances_ = []
-        #clf.set_params(means_=[self.mu0, self.mu1],
-                #priors_=[self.c, 1-self.c],
-                #covariances_=[self.sigma0, self.sigma1])
-        #skpreds = clf.predict(self.data)
-        #skscores = clf.predict_log_proba(self.data)
-
         sum = 0.0
         #class 0 negative log likelihood
-        points = self.data[np.logical_not(self.mask)]
+        points = self.data[self.mask0]
         if points.size > 0:
             sum -= logp_normal(points, self.mu0, self.sigma0).sum()
 
         #class 1 negative log likelihood
-        points = self.data[self.mask]
+        points = self.data[self.mask1]
         if points.size > 0:
             sum -= logp_normal(points, self.mu1, self.sigma1).sum()
                 
+        #Class proportion c (from page 3, eq 1)
+        sum -= log(self.c)*(self.alpha0+self.n0-1) + log(1-self.c)*(self.alpha1+self.n1-1) \
+                - betaln(self.alpha0 + self.n0, self.alpha1 + self.n1)
+
         #Now add in the priors...
-        # we'll assume uniform for class conditional (so we can ignore the
-        # constant)
-        sum -= logp_invwishart(self.sigma0,self.priorDOF0,self.priorsigma0)
-        sum -= logp_invwishart(self.sigma1,self.priorDOF1,self.priorsigma1)
-        sum -= logp_normal(self.mu0, self.priormu0, self.sigma0, self.nu0).sum()
-        sum -= logp_normal(self.mu1, self.priormu1, self.sigma1, self.nu1).sum()
+        sum -= logp_invwishart(self.sigma0,self.kappa0,self.priorsigma0)
+        sum -= logp_invwishart(self.sigma1,self.kappa1,self.priorsigma1)
+        sum -= logp_normal(self.mu0, self.priormu0, self.sigma0, self.nu0)
+        sum -= logp_normal(self.mu1, self.priormu1, self.sigma1, self.nu1)
+
+        self.lastenergy = sum
         return sum
 
     def calc_gfunc(self):
-        gridenergies = logp_normal(self.grid, self.mu0, self.sigma0) * (self.c)
-        gridenergies -= logp_normal(self.grid, self.mu1, self.sigma1) * (1-self.c)
+        gridenergies = logp_normal(self.grid, self.mu1, self.sigma1) 
+        #gridenergies += self.lastenergy*2 
+        #gridenergies += logp_invwishart(self.sigma1,self.kappa1,self.priorsigma1)
+        #gridenergies += logp_normal(self.mu1, self.priormu1, self.sigma1, self.nu1)
         return gridenergies.reshape(self.grid_n,self.grid_n)
+
+        #gridenergies = logp_normal(self.grid, self.mu0, self.sigma0) 
+        #gridenergies += self.lastenergy*2 
+        #gridenergies += logp_invwishart(self.sigma0,self.kappa0,self.priorsigma0)
+        #gridenergies += logp_normal(self.mu0, self.priormu0, self.sigma0, self.nu0)
+        #return gridenergies.reshape(self.grid_n,self.grid_n)
+
+        #gridenergies = logp_normal(self.grid, self.mu0, self.sigma0) + log(self.c)
+        #gridenergies -= logp_normal(self.grid, self.mu1, self.sigma1) + log(1-self.c)
+        #return gridenergies.reshape(self.grid_n,self.grid_n)
 
     def init_db(self, db, dbsize):
         dtype = [('thetas',np.double),
@@ -295,7 +349,7 @@ class Classification():
         else:
             raise Exception("DB Not inited")
 
-    def save_to_db(self, db, theta, energy, iteration, blast):
+    def save_to_db(self, db, theta, energy, iteration):
         func = 0.0
         db[iteration] = np.array([theta, energy, func])
         global mydb
@@ -311,14 +365,16 @@ class Classification():
 
 def plotrun(c, db):
     # Plot the data
+    p.figure()
     splot = p.subplot(2,2,1)
     p.title('Data')
     p.grid(True)
-    count = c.count
-    n = c.N
+    n0 = c.n0
+    n = c.n
 
-    p.plot(c.data[np.arange(count),0], c.data[np.arange(count),1], 'r.')
-    p.plot(c.data[np.arange(count,c.N),0], c.data[np.arange(count,c.N),1], 'g.')
+    p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.', label='class 0')
+    p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.', label='class 1')
+    p.legend()
     plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
     plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
@@ -337,14 +393,41 @@ def plotrun(c, db):
     p.plot(means[0], means[1], 'ro', markersize=10)
     p.plot(means[2], means[3], 'go', markersize=10)
 
+    #splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
+    #p.imshow(c.gavg, extent=c.gextent, origin='lower')
+    #p.colorbar()
+    #p.contour(c.gavg, [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
+
+    #p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
+    #p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
+    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+
+    #############
+    #splot = p.subplot(2,2,4, sharex=splot, sharey=splot)
+    #p.imshow(c.analyticg, extent=c.gextent, origin='lower')
+    #p.colorbar()
+    #p.contour(c.analyticg, [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
+    #p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
+    #p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
+    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+
     splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
     p.imshow(c.gavg, extent=c.gextent, origin='lower')
     p.colorbar()
 
-    p.contour(c.gavg, [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
+    p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
+    p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
+    plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+    plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
-    p.plot(c.data[np.arange(count),0], c.data[np.arange(count),1], 'r.')
-    p.plot(c.data[np.arange(count,c.N),0], c.data[np.arange(count,c.N),1], 'g.')
+    ############
+    splot = p.subplot(2,2,4, sharex=splot, sharey=splot)
+    p.imshow(c.analyticfx0, extent=c.gextent, origin='lower')
+    p.colorbar()
+    p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
+    p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
     plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
     plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
@@ -398,10 +481,9 @@ if __name__ == '__main__':
     
     s = MHRun(c, burn=0)
     s.sample(2e3)
+
+    p.plot(c.analyticfx0[10,:], 'r')
+
     plotrun(c,mydb)
     p.show()
-
-    #clf = QDA()
-    #print clf.fit(c.data, np.hstack((np.zeros(c.true['count']), np.ones(c.N-c.true['count']))))
-    #print clf.predict_log_proba(c.data)
 
