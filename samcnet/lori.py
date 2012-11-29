@@ -322,7 +322,9 @@ class Classification():
         return sum
 
     def calc_gfunc(self):
-        gridenergies = logp_normal(self.grid, self.mu1, self.sigma1) 
+        #gridenergies = np.exp(logp_normal(self.grid, self.mu0, self.sigma0))  \
+        gridenergies = (np.exp(logp_normal(self.grid, self.mu1, self.sigma1)) * (1-self.c)) \
+                / (np.exp(logp_normal(self.grid, self.mu0, self.sigma0)) * self.c)
         #gridenergies += self.lastenergy*2 
         #gridenergies += logp_invwishart(self.sigma1,self.kappa1,self.priorsigma1)
         #gridenergies += logp_normal(self.mu1, self.priormu1, self.sigma1, self.nu1)
@@ -394,29 +396,10 @@ def plotrun(c, db):
     p.plot(means[0], means[1], 'ro', markersize=10)
     p.plot(means[2], means[3], 'go', markersize=10)
 
-    #splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
-    #p.imshow(c.gavg, extent=c.gextent, origin='lower')
-    #p.colorbar()
-    #p.contour(c.gavg, [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
-
-    #p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
-    #p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
-    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
-
-    #############
-    #splot = p.subplot(2,2,4, sharex=splot, sharey=splot)
-    #p.imshow(c.analyticg, extent=c.gextent, origin='lower')
-    #p.colorbar()
-    #p.contour(c.analyticg, [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
-    #p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
-    #p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
-    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
-
     splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
     p.imshow(c.gavg, extent=c.gextent, origin='lower')
     p.colorbar()
+    p.contour(c.gavg, [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
 
     p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
     p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
@@ -425,12 +408,31 @@ def plotrun(c, db):
 
     ############
     splot = p.subplot(2,2,4, sharex=splot, sharey=splot)
-    p.imshow(c.analyticfx0, extent=c.gextent, origin='lower')
+    p.imshow(c.analyticg, extent=c.gextent, origin='lower')
     p.colorbar()
+    p.contour(c.analyticg, [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
     p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
     p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
     plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
     plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+
+    #splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
+    #p.imshow(np.log(c.gavg), extent=c.gextent, origin='lower')
+    #p.colorbar()
+
+    #p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
+    #p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
+    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+
+    #############
+    #splot = p.subplot(2,2,4, sharex=splot, sharey=splot)
+    #p.imshow(c.analyticfx0, extent=c.gextent, origin='lower')
+    #p.colorbar()
+    #p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
+    #p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
+    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
 def plot_ellipse(splot, mean, cov, color):
     v, w = np.linalg.eigh(cov)
@@ -483,8 +485,13 @@ if __name__ == '__main__':
     s = MHRun(c, burn=0)
     s.sample(2e3)
 
-    p.plot(c.analyticfx0[10,:], 'r')
-
     plotrun(c,mydb)
+
+    p.figure()
+    p.plot(c.analyticfx0[10,:], 'r',label='analytic')
+    p.plot(np.log(c.gavg[10,:]), 'g', label='gavg')
+    p.legend()
+    p.grid(True)
+
     p.show()
 
