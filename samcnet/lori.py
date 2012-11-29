@@ -64,9 +64,9 @@ class MHRun():
                 self.mapvalue = self.obj.copy()
                 self.mapenergy = oldenergy
 
-            if self.iteration%1e3 == 0:
-                p.plot(self.obj.gavg[10,:], 'b')
-                p.show()
+            #if self.iteration%1e3 == 0:
+                #p.plot(self.obj.gavg[10,:], 'b')
+                #p.show()
 
             if self.iteration%1e3 == 0:
                 print "Iteration: %9d, best energy: %7f, current energy: %7f" \
@@ -361,6 +361,7 @@ class Classification():
         # Perhaps we'll have to do this offline... because the weights are not
         # fully known yet.
         self.numgavg += 1
+        #self.gavg += (self.calc_gfunc() - self.gavg) / self.numgavg
         self.gavg += (self.calc_gfunc() - self.gavg) / self.numgavg
 
 def plotrun(c, db):
