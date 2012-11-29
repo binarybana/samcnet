@@ -13,8 +13,8 @@ cdef class SAMCRun:
     cdef public:
         object obj, db, refden, hist, mapvalue
         int lowEnergy, highEnergy, grid, accept_loc, total_loc, iteration, burn, stepscale
-        double rho, tau, mapenergy, delta, scale, refden_slope
-    def __init__(self, obj, burn=100000, stepscale = 10000, refden=0.0):
+        double rho, tau, mapenergy, delta, scale, refden_power, temperature
+    def __init__(self, obj, burn=100000, stepscale = 10000, refden=0.0, temperature=1.0):
 
         self.obj = obj # Going to be a BayesNet for now, but we'll keep it general
         self.clear()
@@ -27,7 +27,8 @@ cdef class SAMCRun:
 
         self.burn = burn
         self.stepscale = stepscale
-        self.refden_slope = refden
+        self.refden_power = refden
+        self.temperature = temperature
 
     def set_energy_limits(self):
         cdef int i
@@ -71,7 +72,7 @@ cdef class SAMCRun:
 
         self.grid = <int>ceil((self.highEnergy - self.lowEnergy) / self.scale)
 
-        self.refden = np.arange(self.grid, 0, -1, dtype=np.double)**self.refden_slope
+        self.refden = np.arange(self.grid, 0, -1, dtype=np.double)**self.refden_power
         self.refden /= self.refden.sum()
 
         self.hist = np.zeros((3,self.grid), dtype=np.double)
@@ -144,8 +145,7 @@ cdef class SAMCRun:
         for current_iter in range(self.iteration, self.iteration + int(iters)):
             self.iteration += 1
 
-            #self.delta = temperature * float(self.stepscale) / max(self.stepscale, self.iteration)
-            self.delta = float(self.stepscale) / max(self.stepscale, self.iteration)
+            self.delta = temperature * float(self.stepscale) / max(self.stepscale, self.iteration)
 
             self.obj.propose()
             newenergy = self.obj.energy()
