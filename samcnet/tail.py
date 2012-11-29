@@ -108,11 +108,15 @@ def pnorm(loc,scale):
     p.show()
 
 if __name__ == '__main__':
+    import samc
+    from samcnet.utils import *
     c = Classification()
 
     p.close('all')
     s = MHRun(c, burn=0)
+    #s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=0)
     s.sample(5e4)
+    plotHist(s)
     p.subplot(4,1,1)
     p.plot(c.grid, c.gavg, 'r')
     p.plot(c.data, np.ones_like(c.data), 'ko')
