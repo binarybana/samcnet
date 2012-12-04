@@ -36,6 +36,7 @@ class MHRun():
         self.accept = 0
 
     def sample(self, num):
+        num = int(num)
         self.db = self.obj.init_db(self.db, num)
         minenergy = np.infty
 
@@ -129,7 +130,9 @@ def logp_normal(x, mu, sigma, nu=1.0):
 
 class Classification():
     def __init__(self):
-        np.random.seed(347)
+        seed = np.random.randint(10**6)
+        print "Seed is %d" % seed
+        np.random.seed(seed)
 
         self.D = 2 # Dimension
         self.n = 30 # Data points
@@ -163,7 +166,8 @@ class Classification():
                 'mu0': mu0, 
                 'sigma0': sigma0, 
                 'mu1': mu1, 
-                'sigma1': sigma1}
+                'sigma1': sigma1,
+                'seed': seed}
 
         # For G function calculation and averaging
         self.grid_n = 20
@@ -323,6 +327,7 @@ class Classification():
         return (fx0, fx1)
 
     def init_db(self, db, dbsize):
+        dbsize = int(dbsize)
         dtype = [('thetas',np.double),
                 ('energies',np.double),
                 ('funcs',np.double)]
@@ -351,7 +356,7 @@ class Classification():
         self.fx1avg += (fx1 - self.fx1avg) / self.numgavg
 
 def calc_gavg(c,db):
-    fx0, fx1 = c.calc_eff_densities()
+    fx0, fx1 = c.fx0avg, c.fx1avg
     cmean = np.array([x[4] for x in db]).mean()
     return fx0*cmean / (fx1*(1-cmean))
 
@@ -386,7 +391,7 @@ def plotrun(c, db):
     p.plot(means[2], means[3], 'go', markersize=10)
 
     ############
-    cmeans = np.array([x[-1] for x in db]).mean()
+    cmean = np.array([x[-1] for x in db]).mean()
     
     splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
     gmin, gmax = c.analyticg.min(), c.analyticg.max()
@@ -412,23 +417,52 @@ def plotrun(c, db):
     plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
     plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
-    #splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
-    #p.imshow(np.log(c.gavg), extent=c.gextent, origin='lower')
-    #p.colorbar()
+def plot_cross(c,db,ind=None):
+    p.figure()
+    p.subplot(3,1,1)
+    i0 = np.argmax(c.analyticfx0.sum(axis=1))
+    i1 = np.argmax(c.analyticfx1.sum(axis=1))
 
-    #p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
-    #p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
-    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+    p.plot(c.analyticfx0[i0,:], 'r',label='analyticfx0')
+    p.plot(np.log(c.fx0avg[i0,:]), 'g', label='avgfx0')
+    p.xlabel('slice at index %d from bottom' % i0)
+    p.legend(loc='best')
+    p.grid(True)
+    p.subplot(3,1,2)
+    p.plot(c.analyticfx1[i1,:], 'r',label='analyticfx1')
+    p.plot(np.log(c.fx1avg[i1,:]), 'g', label='avgfx1')
+    p.xlabel('slice at index %d from bottom' % i1)
+    p.legend(loc='best')
+    p.grid(True)
 
-    #############
-    #splot = p.subplot(2,2,4, sharex=splot, sharey=splot)
-    #p.imshow(c.analyticfx0, extent=c.gextent, origin='lower')
-    #p.colorbar()
-    #p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
-    #p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
-    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+    p.subplot(3,1,3)
+    cmean = np.array([x[-1] for x in db]).mean()
+    ind = ind if ind else (i0+i1)/2
+    x = c.grid[:c.grid_n,0]
+    p.plot(x,log(cmean)+np.log(c.fx0avg)[ind,:], 'r', label='avg0')
+    p.plot(x,log(c.Ec)+c.analyticfx0[ind,:], 'r--',label='true0')
+    p.plot(x,log(1-cmean)+np.log(c.fx1avg)[ind,:], 'g', label='avg0')
+    p.plot(x,log(1-c.Ec)+c.analyticfx1[ind,:], 'g--',label='true1')
+    p.xlabel('slice at index %d from bottom' % ind)
+    p.legend(loc='best')
+    p.grid(True)
+
+def plot_eff(c):
+    p.figure()
+    splot = p.subplot(2,1,1)
+    p.imshow(np.log(c.fx0avg), extent=c.gextent, origin='lower')
+    p.title('fx0')
+    p.colorbar()
+    p.plot(c.data[np.arange(c.n0),0], c.data[np.arange(c.n0),1], 'r.')
+    plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+
+    ############
+    splot = p.subplot(2,1,2, sharex=splot, sharey=splot)
+    p.imshow(np.log(c.fx1avg), extent=c.gextent, origin='lower')
+    p.colorbar()
+    p.title('fx1')
+    p.plot(c.data[np.arange(c.n0,c.n),0], c.data[np.arange(c.n0,c.n),1], 'g.')
+    plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
 def plot_ellipse(splot, mean, cov, color):
     v, w = np.linalg.eigh(cov)
@@ -460,68 +494,15 @@ if __name__ == '__main__':
     #from samcnet.utils import *
     c = Classification()
 
-    #print c.energy()
-    #c.propose()
-    #print c.energy()
-    #c.reject()
-    #print c.energy()
-    #c.propose()
-    #for i in range(50):
-        #c.propose()
-    #c.reject()
-    #c.energy()
-
     #s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=2)
+    s = MHRun(c, burn=0)
 
     p.close('all')
     
-    #p.imshow(c.calc_eff_densities(), origin='lower')
-    #p.colorbar()
-    
-    s = MHRun(c, burn=0)
-    s.sample(5e3)
+    s.sample(1e3)
 
     plotrun(c,mydb)
-
-    p.figure()
-    p.subplot(3,1,1)
-    i0 = np.argmax(c.analyticfx0.sum(axis=1))
-    i1 = np.argmax(c.analyticfx1.sum(axis=1))
-
-    p.plot(c.analyticfx0[i0,:], 'r',label='analyticfx0')
-    p.plot(np.log(c.fx0avg[i0,:]), 'g', label='avgfx0')
-    p.xlabel('slice at index %d from bottom' % i0)
-    p.legend()
-    p.grid(True)
-    p.subplot(3,1,2)
-    p.plot(c.analyticfx1[i1,:], 'r',label='analyticfx1')
-    p.plot(np.log(c.fx1avg[i1,:]), 'g', label='avgfx1')
-    p.xlabel('slice at index %d from bottom' % i1)
-    p.legend()
-    p.grid(True)
-
-    p.subplot(3,1,3)
-    p.plot(log(c.Ec)+c.analyticfx0[(i1+i0)/2,:], 'r',label='analyticfx0')
-    p.plot(log(1-c.Ec)+c.analyticfx1[(i0+i1)/2,:], 'g',label='analyticfx1')
-    p.xlabel('slice at index %d from bottom' % i1)
-    p.legend(loc='best')
-    p.grid(True)
-
-    #p.figure()
-    #splot = p.subplot(2,1,1)
-    #p.imshow(np.log(c.fx0avg), extent=c.gextent, origin='lower')
-    #p.title('fx0')
-    #p.colorbar()
-    #p.plot(c.data[np.arange(c.n0),0], c.data[np.arange(c.n0),1], 'r.')
-    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-
-    #############
-    #splot = p.subplot(2,1,2, sharex=splot, sharey=splot)
-    #p.imshow(np.log(c.fx1avg), extent=c.gextent, origin='lower')
-    #p.colorbar()
-    #p.title('fx1')
-    #p.plot(c.data[np.arange(c.n0,c.n),0], c.data[np.arange(c.n0,c.n),1], 'g.')
-    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+    plot_cross(c,mydb)
+    #plot_eff(c)
 
     p.show()
-
