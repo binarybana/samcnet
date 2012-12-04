@@ -129,20 +129,31 @@ def logp_normal(x, mu, sigma, nu=1.0):
 
 class Classification():
     def __init__(self):
-        np.random.seed(1234)
+        np.random.seed(347)
 
         self.D = 2 # Dimension
         self.n = 30 # Data points
 
+        ##### Prior Values and Confidences ######
+        self.priorsigma0 = np.eye(self.D)*10.3
+        self.priorsigma1 = np.eye(self.D)*10.3
+        self.kappa0 = 6
+        self.kappa1 = 6
+
+        self.priormu0 = np.zeros(self.D)
+        self.priormu1 = np.ones(self.D)
+
+        self.nu0 = 12.0
+        self.nu1 = 12.0
+
+        self.alpha0 = 1.0
+        self.alpha1 = 1.0
+
         #### Ground Truth Parameters 
-        DOF = 3 # For random ground truth COV mats
-        c = 0.83 # Ground truth class marginal
+        c = 0.82 # Ground truth class marginal
 
-        temp0 = sample_invwishart(np.eye(self.D), DOF)
-        temp1 = sample_invwishart(np.eye(self.D), DOF)
-
-        sigma0 = np.dot(temp0.T,temp0)
-        sigma1 = np.dot(temp1.T,temp1)
+        sigma0 = sample_invwishart(self.priorsigma0, self.nu0)
+        sigma1 = sample_invwishart(self.priorsigma1, self.nu1)
 
         mu0 = np.zeros(self.D)
         mu1 = np.ones(self.D)
@@ -152,8 +163,7 @@ class Classification():
                 'mu0': mu0, 
                 'sigma0': sigma0, 
                 'mu1': mu1, 
-                'sigma1': sigma1,
-                'dof': DOF}
+                'sigma1': sigma1}
 
         # For G function calculation and averaging
         self.grid_n = 20
@@ -162,8 +172,8 @@ class Classification():
         self.grid = np.dstack(np.meshgrid(
                         np.linspace(lx,hx,self.grid_n),
                         np.linspace(ly,hy,self.grid_n))).reshape(-1,2)
-        self.gavg = np.zeros((self.grid_n, self.grid_n))
         self.fx0avg = np.zeros((self.grid_n, self.grid_n))
+        self.fx1avg = np.zeros((self.grid_n, self.grid_n))
         self.numgavg = 0
 
         self.n0 = st.binom.rvs(self.n, c)
@@ -178,23 +188,8 @@ class Classification():
         self.mask1 = np.logical_not(self.mask0)
 
         ##### Proposal variances ######
-        self.propdof = 50
+        self.propdof = 100
         self.propmu = 0.3
-
-        ##### Prior Values and Confidences ######
-        self.priorsigma0 = np.eye(self.D)*0.3
-        self.priorsigma1 = np.eye(self.D)*0.3
-        self.kappa0 = 6
-        self.kappa1 = 6
-
-        self.priormu0 = np.zeros(self.D)
-        self.priormu1 = np.ones(self.D)
-
-        self.nu0 = 12.0
-        self.nu1 = 2.0
-
-        self.alpha0 = 1.0
-        self.alpha1 = 1.0
 
         ######## Starting point of MCMC Run #######
         # 'Cheat' by starting at the 'right' spot... for now
@@ -261,7 +256,8 @@ class Classification():
                 - self.fx1.logpdf(self.grid)).reshape(self.grid_n, -1) \
                 + log(self.Ec) - log(1-self.Ec)
 
-        self.analyticfx0 = self.fx1.logpdf(self.grid).reshape(self.grid_n, -1)
+        self.analyticfx0 = self.fx0.logpdf(self.grid).reshape(self.grid_n, -1)
+        self.analyticfx1 = self.fx1.logpdf(self.grid).reshape(self.grid_n, -1)
 
     def propose(self):
         self.oldmu0 = self.mu0.copy()
@@ -321,24 +317,10 @@ class Classification():
         self.lastenergy = sum
         return sum
 
-    def calc_gfunc(self):
-        #gridenergies = np.exp(logp_normal(self.grid, self.mu0, self.sigma0))  \
-        gridenergies = (np.exp(logp_normal(self.grid, self.mu1, self.sigma1)) * (1-self.c)) \
-                / (np.exp(logp_normal(self.grid, self.mu0, self.sigma0)) * self.c)
-        #gridenergies += self.lastenergy*2 
-        #gridenergies += logp_invwishart(self.sigma1,self.kappa1,self.priorsigma1)
-        #gridenergies += logp_normal(self.mu1, self.priormu1, self.sigma1, self.nu1)
-        return gridenergies.reshape(self.grid_n,self.grid_n)
-
-        #gridenergies = logp_normal(self.grid, self.mu0, self.sigma0) 
-        #gridenergies += self.lastenergy*2 
-        #gridenergies += logp_invwishart(self.sigma0,self.kappa0,self.priorsigma0)
-        #gridenergies += logp_normal(self.mu0, self.priormu0, self.sigma0, self.nu0)
-        #return gridenergies.reshape(self.grid_n,self.grid_n)
-
-        #gridenergies = logp_normal(self.grid, self.mu0, self.sigma0) + log(self.c)
-        #gridenergies -= logp_normal(self.grid, self.mu1, self.sigma1) + log(1-self.c)
-        #return gridenergies.reshape(self.grid_n,self.grid_n)
+    def calc_eff_densities(self):
+        fx0 = np.exp(logp_normal(self.grid, self.mu0, self.sigma0)).reshape(self.grid_n,self.grid_n)
+        fx1 = np.exp(logp_normal(self.grid, self.mu1, self.sigma1)).reshape(self.grid_n,self.grid_n)
+        return (fx0, fx1)
 
     def init_db(self, db, dbsize):
         dtype = [('thetas',np.double),
@@ -363,8 +345,15 @@ class Classification():
         # Perhaps we'll have to do this offline... because the weights are not
         # fully known yet.
         self.numgavg += 1
-        #self.gavg += (self.calc_gfunc() - self.gavg) / self.numgavg
-        self.gavg += (self.calc_gfunc() - self.gavg) / self.numgavg
+        #self.gavg += (self.calc_eff_densities() - self.gavg) / self.numgavg
+        fx0, fx1 = self.calc_eff_densities()
+        self.fx0avg += (fx0 - self.fx0avg) / self.numgavg
+        self.fx1avg += (fx1 - self.fx1avg) / self.numgavg
+
+def calc_gavg(c,db):
+    fx0, fx1 = c.calc_eff_densities()
+    cmean = np.array([x[4] for x in db]).mean()
+    return fx0*cmean / (fx1*(1-cmean))
 
 def plotrun(c, db):
     # Plot the data
@@ -396,10 +385,15 @@ def plotrun(c, db):
     p.plot(means[0], means[1], 'ro', markersize=10)
     p.plot(means[2], means[3], 'go', markersize=10)
 
+    ############
+    cmeans = np.array([x[-1] for x in db]).mean()
+    
     splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
-    p.imshow(c.gavg, extent=c.gextent, origin='lower')
+    gmin, gmax = c.analyticg.min(), c.analyticg.max()
+    gavg = np.clip(calc_gavg(c,db), np.exp(gmin), np.exp(gmax))
+    p.imshow(np.log(gavg), extent=c.gextent, origin='lower')
     p.colorbar()
-    p.contour(c.gavg, [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
+    p.contour(np.log(gavg), [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
 
     p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
     p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
@@ -411,8 +405,10 @@ def plotrun(c, db):
     p.imshow(c.analyticg, extent=c.gextent, origin='lower')
     p.colorbar()
     p.contour(c.analyticg, [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
+
     p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
     p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
+
     plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
     plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
@@ -460,14 +456,14 @@ def calc_means(db):
     return arr.mean(axis=0)
 
 if __name__ == '__main__':
-    import samc
-    from samcnet.utils import *
+    #import samc
+    #from samcnet.utils import *
     c = Classification()
 
-    print c.energy()
-    c.propose()
-    print c.energy()
-    c.reject()
+    #print c.energy()
+    #c.propose()
+    #print c.energy()
+    #c.reject()
     #print c.energy()
     #c.propose()
     #for i in range(50):
@@ -479,19 +475,53 @@ if __name__ == '__main__':
 
     p.close('all')
     
-    #p.imshow(c.calc_gfunc(), origin='lower')
+    #p.imshow(c.calc_eff_densities(), origin='lower')
     #p.colorbar()
     
     s = MHRun(c, burn=0)
-    s.sample(2e3)
+    s.sample(5e3)
 
     plotrun(c,mydb)
 
     p.figure()
-    p.plot(c.analyticfx0[10,:], 'r',label='analytic')
-    p.plot(np.log(c.gavg[10,:]), 'g', label='gavg')
+    p.subplot(3,1,1)
+    i0 = np.argmax(c.analyticfx0.sum(axis=1))
+    i1 = np.argmax(c.analyticfx1.sum(axis=1))
+
+    p.plot(c.analyticfx0[i0,:], 'r',label='analyticfx0')
+    p.plot(np.log(c.fx0avg[i0,:]), 'g', label='avgfx0')
+    p.xlabel('slice at index %d from bottom' % i0)
     p.legend()
     p.grid(True)
+    p.subplot(3,1,2)
+    p.plot(c.analyticfx1[i1,:], 'r',label='analyticfx1')
+    p.plot(np.log(c.fx1avg[i1,:]), 'g', label='avgfx1')
+    p.xlabel('slice at index %d from bottom' % i1)
+    p.legend()
+    p.grid(True)
+
+    p.subplot(3,1,3)
+    p.plot(log(c.Ec)+c.analyticfx0[(i1+i0)/2,:], 'r',label='analyticfx0')
+    p.plot(log(1-c.Ec)+c.analyticfx1[(i0+i1)/2,:], 'g',label='analyticfx1')
+    p.xlabel('slice at index %d from bottom' % i1)
+    p.legend(loc='best')
+    p.grid(True)
+
+    #p.figure()
+    #splot = p.subplot(2,1,1)
+    #p.imshow(np.log(c.fx0avg), extent=c.gextent, origin='lower')
+    #p.title('fx0')
+    #p.colorbar()
+    #p.plot(c.data[np.arange(c.n0),0], c.data[np.arange(c.n0),1], 'r.')
+    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+
+    #############
+    #splot = p.subplot(2,1,2, sharex=splot, sharey=splot)
+    #p.imshow(np.log(c.fx1avg), extent=c.gextent, origin='lower')
+    #p.colorbar()
+    #p.title('fx1')
+    #p.plot(c.data[np.arange(c.n0,c.n),0], c.data[np.arange(c.n0,c.n),1], 'g.')
+    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
     p.show()
 
