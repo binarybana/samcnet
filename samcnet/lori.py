@@ -7,10 +7,11 @@ import random
 from math import log, exp, pi, lgamma
 
 import scipy.stats as st
+import scipy.stats.distributions as di
 import scipy
 from scipy.special import betaln
 
-from statsmodels.sandbox.distributions.mv_normal import MVT
+from statsmodels.sandbox.distributions.mv_normal import MVT,MVNormal
 #from sklearn.qda import QDA
 
 import sys
@@ -131,6 +132,8 @@ def logp_normal(x, mu, sigma, nu=1.0):
 class Classification():
     def __init__(self):
         seed = np.random.randint(10**6)
+        #seed = 565514
+        #seed = 179288
         print "Seed is %d" % seed
         np.random.seed(seed)
 
@@ -138,40 +141,50 @@ class Classification():
         self.n = 30 # Data points
 
         ##### Prior Values and Confidences ######
-        self.priorsigma0 = np.eye(self.D)*10.3
-        self.priorsigma1 = np.eye(self.D)*10.3
+        self.priorsigma0 = np.eye(self.D)*0.3
+        self.priorsigma1 = np.eye(self.D)*0.3
         self.kappa0 = 6
         self.kappa1 = 6
 
         self.priormu0 = np.zeros(self.D)
-        self.priormu1 = np.ones(self.D)
+        self.priormu1 = np.ones(self.D)*0.5
 
         self.nu0 = 12.0
-        self.nu1 = 12.0
+        self.nu1 = 2.0
 
         self.alpha0 = 1.0
         self.alpha1 = 1.0
 
         #### Ground Truth Parameters 
-        c = 0.82 # Ground truth class marginal
+        c = 0.83 # Ground truth class marginal
 
         sigma0 = sample_invwishart(self.priorsigma0, self.nu0)
         sigma1 = sample_invwishart(self.priorsigma1, self.nu1)
 
-        mu0 = np.zeros(self.D)
-        mu1 = np.ones(self.D)
+        #mu0 = np.zeros(self.D)
+        #mu1 = np.ones(self.D)
+        #mu0 = MVNormal(mean=self.priormu0, sigma=sigma0/self.nu0).rvs(1)
+        #mu1 = MVNormal(mean=self.priormu1, sigma=sigma1/self.nu1).rvs1)
+        mu0 = np.random.multivariate_normal(self.priormu0, sigma0/self.nu0, size=1)[0]
+        mu1 = np.random.multivariate_normal(self.priormu1, sigma1/self.nu1, size=1)[0]
 
         ##### Record true values for plotting, comparison #######
         self.true = {'c':c, 
-                'mu0': mu0, 
-                'sigma0': sigma0, 
-                'mu1': mu1, 
-                'sigma1': sigma1,
+                'mu0': mu0.copy(), 
+                'sigma0': sigma0.copy(), 
+                'mu1': mu1.copy(), 
+                'sigma1': sigma1.copy(),
                 'seed': seed}
 
         # For G function calculation and averaging
-        self.grid_n = 20
-        lx,hx,ly,hy = (-4,4,-4,4)
+        self.grid_n = 30
+        #lx,hx,ly,hy = (-4,4,-4,4)
+        lx,hx,ly,hy = np.vstack((np.minimum(mu0,mu1), np.maximum(mu0,mu1))).T.flatten()
+        xspread, yspread = np.diag(sigma0 + sigma1)/2
+        lx -= xspread + 0.5*yspread
+        hx += xspread + 0.5*yspread
+        ly -= yspread + 0.5*xspread
+        hy += yspread + 0.5*xspread
         self.gextent = (lx,hx,ly,hy)
         self.grid = np.dstack(np.meshgrid(
                         np.linspace(lx,hx,self.grid_n),
@@ -197,18 +210,21 @@ class Classification():
 
         ######## Starting point of MCMC Run #######
         # 'Cheat' by starting at the 'right' spot... for now
-        self.c = c
-        self.mu0 = mu0.copy()
-        self.mu1 = mu1.copy()
-        self.sigma0 = sigma0.copy()
-        self.sigma1 = sigma1.copy()
-        #self.c = np.random.rand()
+        #self.c = c
+        #self.mu0 = mu0.copy()
+        #self.mu1 = mu1.copy()
+        #self.sigma0 = sigma0.copy()
+        #self.sigma1 = sigma1.copy()
+
+        self.c = np.random.rand()
         #self.mu0 = np.random.rand(self.D)
         #self.mu1 = np.random.rand(self.D)
-        #self.sigma0 = sample_invwishart(self.priorsigma0, self.kappa0)
-        #self.sigma1 = sample_invwishart(self.priorsigma1, self.kappa1)
+        self.sigma0 = sample_invwishart(self.priorsigma0, self.kappa0)
+        self.sigma1 = sample_invwishart(self.priorsigma1, self.kappa1)
 
-        
+        self.mu0 = self.data[self.mask0].mean(axis=0)
+        self.mu1 = self.data[self.mask1].mean(axis=0)
+
         ###### Bookeeping ######
         self.oldmu0 = None
         self.oldmu1 = None
@@ -224,8 +240,8 @@ class Classification():
         self.nu0star = self.nu0 + self.n0
         self.nu1star = self.nu1 + self.n1
 
-        sample0mean = self.data[self.mask0].mean()
-        sample1mean = self.data[self.mask1].mean()
+        sample0mean = self.data[self.mask0].mean(axis=0)
+        sample1mean = self.data[self.mask1].mean(axis=0)
         sample0cov = np.cov(self.data[self.mask0].T)
         sample1cov = np.cov(self.data[self.mask1].T)
 
@@ -271,11 +287,17 @@ class Classification():
         self.oldc = self.c
         self.oldlastenergy = self.lastenergy
 
-        self.mu0 += (np.random.rand(self.D)-0.5)*self.propmu
-        self.mu1 += (np.random.rand(self.D)-0.5)*self.propmu
+        if np.random.rand() < 0.01: # Random restart
+            self.mu0 = self.data[self.mask0].mean(axis=0)
+            self.mu1 = self.data[self.mask1].mean(axis=0)
+            self.sigma0 = sample_invwishart(self.priorsigma0, self.kappa0)
+            self.sigma1 = sample_invwishart(self.priorsigma1, self.kappa1)
+        else:
+            self.mu0 += (np.random.rand(self.D)-0.5)*self.propmu
+            self.mu1 += (np.random.rand(self.D)-0.5)*self.propmu
+            self.sigma0 = sample_invwishart(self.sigma0*self.propdof, self.propdof)
+            self.sigma1 = sample_invwishart(self.sigma1*self.propdof, self.propdof)
 
-        self.sigma0 = sample_invwishart(self.sigma0*self.propdof, self.propdof)
-        self.sigma1 = sample_invwishart(self.sigma1*self.propdof, self.propdof)
         
         add = np.random.randn()*0.1
         self.c += add
@@ -360,7 +382,7 @@ def calc_gavg(c,db):
     cmean = np.array([x[4] for x in db]).mean()
     return fx0*cmean / (fx1*(1-cmean))
 
-def plotrun(c, db):
+def plot_run(c, db):
     # Plot the data
     p.figure()
     splot = p.subplot(2,2,1)
@@ -371,7 +393,7 @@ def plotrun(c, db):
 
     p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.', label='class 0')
     p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.', label='class 1')
-    p.legend()
+    p.legend(loc='best')
     plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
     plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
@@ -419,26 +441,26 @@ def plotrun(c, db):
 
 def plot_cross(c,db,ind=None):
     p.figure()
+    x = c.grid[:c.grid_n,0]
     p.subplot(3,1,1)
     i0 = np.argmax(c.analyticfx0.sum(axis=1))
     i1 = np.argmax(c.analyticfx1.sum(axis=1))
 
-    p.plot(c.analyticfx0[i0,:], 'r',label='analyticfx0')
-    p.plot(np.log(c.fx0avg[i0,:]), 'g', label='avgfx0')
+    p.plot(x,c.analyticfx0[i0,:], 'r',label='analyticfx0')
+    p.plot(x,np.log(c.fx0avg[i0,:]), 'g', label='avgfx0')
     p.xlabel('slice at index %d from bottom' % i0)
     p.legend(loc='best')
     p.grid(True)
     p.subplot(3,1,2)
-    p.plot(c.analyticfx1[i1,:], 'r',label='analyticfx1')
-    p.plot(np.log(c.fx1avg[i1,:]), 'g', label='avgfx1')
+    p.plot(x,c.analyticfx1[i1,:], 'r',label='analyticfx1')
+    p.plot(x,np.log(c.fx1avg[i1,:]), 'g', label='avgfx1')
     p.xlabel('slice at index %d from bottom' % i1)
     p.legend(loc='best')
     p.grid(True)
 
     p.subplot(3,1,3)
-    cmean = np.array([x[-1] for x in db]).mean()
+    cmean = np.array([y[-1] for y in db]).mean()
     ind = ind if ind else (i0+i1)/2
-    x = c.grid[:c.grid_n,0]
     p.plot(x,log(cmean)+np.log(c.fx0avg)[ind,:], 'r', label='avg0')
     p.plot(x,log(c.Ec)+c.analyticfx0[ind,:], 'r--',label='true0')
     p.plot(x,log(1-cmean)+np.log(c.fx1avg)[ind,:], 'g', label='avg0')
@@ -495,13 +517,13 @@ if __name__ == '__main__':
     c = Classification()
 
     #s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=2)
-    s = MHRun(c, burn=0)
+    s = MHRun(c, burn=1000)
 
     p.close('all')
     
-    s.sample(1e3)
+    s.sample(3e3)
 
-    plotrun(c,mydb)
+    plot_run(c,mydb)
     plot_cross(c,mydb)
     #plot_eff(c)
 
