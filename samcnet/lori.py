@@ -66,10 +66,6 @@ class MHRun():
                 self.mapvalue = self.obj.copy()
                 self.mapenergy = oldenergy
 
-            #if self.iteration%1e3 == 0:
-                #p.plot(self.obj.gavg[10,:], 'b')
-                #p.show()
-
             if self.iteration%1e3 == 0:
                 print "Iteration: %9d, best energy: %7f, current energy: %7f" \
                         % (self.iteration, minenergy, oldenergy)
@@ -125,15 +121,10 @@ def logp_normal(x, mu, sigma, nu=1.0):
     t3 = - nu/2 * (np.dot((x-mu), np.linalg.inv(sigma)) \
             * (x-mu)).sum(axis=axis)
     return t1+t2+t3
-    #return (-0.5*k*log(2*pi) - 0.5*log(np.linalg.det(sigma)) \
-            #- nu/2* (np.dot((x-mu), np.linalg.inv(sigma)) \
-            #* (x-mu)).sum(axis=axis)).sum()
 
 class Classification():
     def __init__(self):
         seed = np.random.randint(10**6)
-        #seed = 565514
-        #seed = 179288
         print "Seed is %d" % seed
         np.random.seed(seed)
 
@@ -163,8 +154,6 @@ class Classification():
 
         #mu0 = np.zeros(self.D)
         #mu1 = np.ones(self.D)
-        #mu0 = MVNormal(mean=self.priormu0, sigma=sigma0/self.nu0).rvs(1)
-        #mu1 = MVNormal(mean=self.priormu1, sigma=sigma1/self.nu1).rvs1)
         mu0 = np.random.multivariate_normal(self.priormu0, sigma0/self.nu0, size=1)[0]
         mu1 = np.random.multivariate_normal(self.priormu1, sigma1/self.nu1, size=1)[0]
 
@@ -181,10 +170,10 @@ class Classification():
         #lx,hx,ly,hy = (-4,4,-4,4)
         lx,hx,ly,hy = np.vstack((np.minimum(mu0,mu1), np.maximum(mu0,mu1))).T.flatten()
         xspread, yspread = np.diag(sigma0 + sigma1)/2
-        lx -= xspread + 0.5*yspread
-        hx += xspread + 0.5*yspread
-        ly -= yspread + 0.5*xspread
-        hy += yspread + 0.5*xspread
+        lx -= (xspread + 0.5*yspread) * 1.3
+        hx += (xspread + 0.5*yspread) * 1.3
+        ly -= (yspread + 0.5*xspread) * 1.3
+        hy += (yspread + 0.5*xspread) * 1.3
         self.gextent = (lx,hx,ly,hy)
         self.grid = np.dstack(np.meshgrid(
                         np.linspace(lx,hx,self.grid_n),
@@ -205,25 +194,15 @@ class Classification():
         self.mask1 = np.logical_not(self.mask0)
 
         ##### Proposal variances ######
-        self.propdof = 100
-        self.propmu = 0.3
+        self.propdof = 200
+        self.propmu = 0.2
 
         ######## Starting point of MCMC Run #######
-        # 'Cheat' by starting at the 'right' spot... for now
-        #self.c = c
-        #self.mu0 = mu0.copy()
-        #self.mu1 = mu1.copy()
-        #self.sigma0 = sigma0.copy()
-        #self.sigma1 = sigma1.copy()
-
         self.c = np.random.rand()
-        #self.mu0 = np.random.rand(self.D)
-        #self.mu1 = np.random.rand(self.D)
-        self.sigma0 = sample_invwishart(self.priorsigma0, self.kappa0)
-        self.sigma1 = sample_invwishart(self.priorsigma1, self.kappa1)
-
         self.mu0 = self.data[self.mask0].mean(axis=0)
         self.mu1 = self.data[self.mask1].mean(axis=0)
+        self.sigma0 = sample_invwishart(self.priorsigma0, self.kappa0)
+        self.sigma1 = sample_invwishart(self.priorsigma1, self.kappa1)
 
         ###### Bookeeping ######
         self.oldmu0 = None
@@ -231,9 +210,9 @@ class Classification():
         self.oldsigma0 = None
         self.oldsigma1 = None
         self.oldc = None
-        self.oldlastenergy = None
 
-        self.lastenergy = -np.infty
+        self.predthetasum = 0
+        self.thetasum = 0
 
         #### Calculating the Analytic solution given on page 15 of Lori's 
         #### Optimal Classification eq 34.
@@ -285,7 +264,6 @@ class Classification():
         self.oldsigma0 = self.sigma0.copy()
         self.oldsigma1 = self.sigma1.copy()
         self.oldc = self.c
-        self.oldlastenergy = self.lastenergy
 
         if np.random.rand() < 0.01: # Random restart
             self.mu0 = self.data[self.mask0].mean(axis=0)
@@ -298,7 +276,6 @@ class Classification():
             self.sigma0 = sample_invwishart(self.sigma0*self.propdof, self.propdof)
             self.sigma1 = sample_invwishart(self.sigma1*self.propdof, self.propdof)
 
-        
         add = np.random.randn()*0.1
         self.c += add
         if self.c >= 1.0:
@@ -316,7 +293,6 @@ class Classification():
         self.sigma0 = self.oldsigma0.copy()
         self.sigma1 = self.oldsigma1.copy()
         self.c = self.oldc
-        self.lastenergy = self.oldlastenergy
 
     def energy(self):
         sum = 0.0
@@ -340,10 +316,9 @@ class Classification():
         sum -= logp_normal(self.mu0, self.priormu0, self.sigma0, self.nu0)
         sum -= logp_normal(self.mu1, self.priormu1, self.sigma1, self.nu1)
 
-        self.lastenergy = sum
         return sum
 
-    def calc_eff_densities(self):
+    def calc_current_densities(self):
         fx0 = np.exp(logp_normal(self.grid, self.mu0, self.sigma0)).reshape(self.grid_n,self.grid_n)
         fx1 = np.exp(logp_normal(self.grid, self.mu1, self.sigma1)).reshape(self.grid_n,self.grid_n)
         return (fx0, fx1)
@@ -372,10 +347,27 @@ class Classification():
         # Perhaps we'll have to do this offline... because the weights are not
         # fully known yet.
         self.numgavg += 1
-        #self.gavg += (self.calc_eff_densities() - self.gavg) / self.numgavg
-        fx0, fx1 = self.calc_eff_densities()
-        self.fx0avg += (fx0 - self.fx0avg) / self.numgavg
-        self.fx1avg += (fx1 - self.fx1avg) / self.numgavg
+        #self.gavg += (self.calc_current_densities() - self.gavg) / self.numgavg
+        fx0, fx1 = self.calc_current_densities()
+
+        if not theta: # MH
+            self.fx0avg += (fx0 - self.fx0avg) / self.numgavg
+            self.fx1avg += (fx1 - self.fx1avg) / self.numgavg
+        else: # SAMC
+            self.predthetasum = self.thetasum
+            self.thetasum += exp(theta)
+            self.fx0avg = (exp(theta)*fx0 + self.predthetasum * self.fx0avg) / self.thetasum
+            self.fx1avg = (exp(theta)*fx1 + self.predthetasum * self.fx1avg) / self.thetasum
+
+    def draw_from_true(self, cls, n=100):
+        if cls == 0:
+            mu = self.true['mu0']
+            sigma = self.true['sigma0']
+        else:
+            mu = self.true['mu1']
+            sigma = self.true['sigma1']
+        return np.random.multivariate_normal(mu, sigma, n)
+
 
 def calc_gavg(c,db):
     fx0, fx1 = c.fx0avg, c.fx1avg
@@ -512,16 +504,16 @@ def calc_means(db):
     return arr.mean(axis=0)
 
 if __name__ == '__main__':
-    #import samc
-    #from samcnet.utils import *
+    import samc
+    from samcnet.utils import *
     c = Classification()
 
-    #s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=2)
+    #s = samc.SAMCRun(c, burn=1000, stepscale=1000, refden=2)
     s = MHRun(c, burn=1000)
 
     p.close('all')
     
-    s.sample(3e3)
+    s.sample(5e3)
 
     plot_run(c,mydb)
     plot_cross(c,mydb)
