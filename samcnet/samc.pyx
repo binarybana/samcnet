@@ -137,7 +137,7 @@ cdef class SAMCRun:
         dbsize = self.iteration + int(iters) - self.burn
         if dbsize < 0:
             dbsize = 0
-        self.db = self.obj.init_db(self.db, dbsize)
+        self.db = self.obj.init_db(self.db, dbsize, 'samc')
         
         #func_detail = np.empty(dbsize/100, dtype=np.double)
         print("Initial Energy: %g" % oldenergy)

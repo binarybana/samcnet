@@ -74,10 +74,11 @@ cdef class BayesNet:
         #"""
         #pass
 
-    def init_db(self, db, size):
+    def init_db(self, db, size, method):
         dtype = [('thetas',np.double),
                  ('energies',np.double),
                  ('funcs',np.double)]
+        assert method == 'samc'
         if db == None:
             return np.zeros(size, dtype=dtype)
         elif db.shape[0] != size:

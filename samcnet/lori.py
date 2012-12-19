@@ -18,8 +18,6 @@ import sys
 sys.path.append('/home/bana/GSP/research/samc/code')
 sys.path.append('/home/bana/GSP/research/samc/code/build')
 
-mydb = []
-
 class MHRun():
     def __init__(self, obj, burn, thin=1):
         self.obj = obj
@@ -38,7 +36,7 @@ class MHRun():
 
     def sample(self, num):
         num = int(num)
-        self.db = self.obj.init_db(self.db, num)
+        self.db = self.obj.init_db(self.db, (self.iteration + num - self.burn)//self.thin, 'mh')
         minenergy = np.infty
 
         oldenergy = self.obj.energy()
@@ -58,8 +56,8 @@ class MHRun():
             else:
                 self.obj.reject()
 
-            if i>self.burn and i%self.thin == 0:
-                self.obj.save_to_db(self.db, 0, oldenergy, i)
+            if self.iteration>self.burn and i%self.thin == 0:
+                self.obj.save_to_db(self.db, 0, oldenergy, (self.iteration-self.burn-1)//self.thin)
 
             if oldenergy < minenergy:
                 minenergy = oldenergy
@@ -165,23 +163,6 @@ class Classification():
                 'sigma1': sigma1.copy(),
                 'seed': seed}
 
-        # For G function calculation and averaging
-        self.grid_n = 30
-        #lx,hx,ly,hy = (-4,4,-4,4)
-        lx,hx,ly,hy = np.vstack((np.minimum(mu0,mu1), np.maximum(mu0,mu1))).T.flatten()
-        xspread, yspread = np.diag(sigma0 + sigma1)/2
-        lx -= (xspread + 0.5*yspread) * 1.3
-        hx += (xspread + 0.5*yspread) * 1.3
-        ly -= (yspread + 0.5*xspread) * 1.3
-        hy += (yspread + 0.5*xspread) * 1.3
-        self.gextent = (lx,hx,ly,hy)
-        self.grid = np.dstack(np.meshgrid(
-                        np.linspace(lx,hx,self.grid_n),
-                        np.linspace(ly,hy,self.grid_n))).reshape(-1,2)
-        self.fx0avg = np.zeros((self.grid_n, self.grid_n))
-        self.fx1avg = np.zeros((self.grid_n, self.grid_n))
-        self.numgavg = 0
-
         self.n0 = st.binom.rvs(self.n, c)
         self.n1 = self.n - self.n0
         self.data = np.vstack(( \
@@ -211,8 +192,7 @@ class Classification():
         self.oldsigma1 = None
         self.oldc = None
 
-        self.predthetasum = 0
-        self.thetasum = 0
+        self.mtype = ''
 
         #### Calculating the Analytic solution given on page 15 of Lori's 
         #### Optimal Classification eq 34.
@@ -248,15 +228,7 @@ class Classification():
                 self.mu1star, 
                 (self.nu1star+1)/(self.kappa1star-self.D+1)/self.nu1star * self.S1star, 
                 self.kappa1star - self.D + 1)
-
-        # Expectation of C from page 3 eq. 1 using beta conjugate prior
         self.Ec = (self.n0 + self.alpha0) / (self.n + self.alpha0 + self.alpha1)
-        self.analyticg = (self.fx0.logpdf(self.grid) \
-                - self.fx1.logpdf(self.grid)).reshape(self.grid_n, -1) \
-                + log(self.Ec) - log(1-self.Ec)
-
-        self.analyticfx0 = self.fx0.logpdf(self.grid).reshape(self.grid_n, -1)
-        self.analyticfx1 = self.fx1.logpdf(self.grid).reshape(self.grid_n, -1)
 
     def propose(self):
         self.oldmu0 = self.mu0.copy()
@@ -318,46 +290,74 @@ class Classification():
 
         return sum
 
-    def calc_current_densities(self):
-        fx0 = np.exp(logp_normal(self.grid, self.mu0, self.sigma0)).reshape(self.grid_n,self.grid_n)
-        fx1 = np.exp(logp_normal(self.grid, self.mu1, self.sigma1)).reshape(self.grid_n,self.grid_n)
+    def calc_densities(self, grid, n, record):
+        fx0 = np.exp(logp_normal(grid, record['mu0'], record['sigma0'])).reshape(n,n)
+        fx1 = np.exp(logp_normal(grid, record['mu1'], record['sigma1'])).reshape(n,n)
         return (fx0, fx1)
 
-    def init_db(self, db, dbsize):
+    def init_db(self, db, dbsize, mhtype):
+        self.mhtype = mhtype
         dbsize = int(dbsize)
-        dtype = [('thetas',np.double),
-                ('energies',np.double),
-                ('funcs',np.double)]
+        self.dtype = [('theta',np.double),
+                ('energy',np.double),
+                ('mu0',np.object),
+                ('mu1',np.object),
+                ('sigma0',np.object),
+                ('sigma1',np.object),
+                ('c', np.double)]
         if db == None:
-            return np.zeros(dbsize, dtype=dtype)
+            return np.zeros(dbsize, dtype=self.dtype)
         elif db.shape[0] != dbsize:
             return np.resize(db, dbsize)
         else:
             raise Exception("DB Not inited")
 
     def save_to_db(self, db, theta, energy, iteration):
-        func = 0.0
-        db[iteration] = np.array([theta, energy, func])
-        global mydb
-        mydb.append(self.copy())
+        record = [theta, energy]
+        record.extend(self.copy())
+        db[iteration] = tuple(record)
 
-        # Update G function average
-        # TODO: Need to test if MCMC is weighted (SAMC) and if it is, 
-        # then perform a weighted running average (is this possible with SAMC?)
-        # Perhaps we'll have to do this offline... because the weights are not
-        # fully known yet.
-        self.numgavg += 1
-        #self.gavg += (self.calc_current_densities() - self.gavg) / self.numgavg
-        fx0, fx1 = self.calc_current_densities()
+    def get_grid(self):
+        samples = np.vstack((self.draw_from_true(0), self.draw_from_true(1)))
+        n = 30
+        lx,hx,ly,hy = np.vstack((samples.min(axis=0), samples.max(axis=0))).T.flatten()
+        xspread, yspread = hx-lx, hy-ly
+        lx -= xspread * 0.2
+        hx += xspread * 0.2
+        ly -= yspread * 0.2
+        hy += yspread * 0.2
+        gextent = (lx,hx,ly,hy)
+        grid = np.dstack(np.meshgrid(
+                        np.linspace(lx,hx,n),
+                        np.linspace(ly,hy,n))).reshape(-1,2)
+        return n, gextent, grid
 
-        if not theta: # MH
-            self.fx0avg += (fx0 - self.fx0avg) / self.numgavg
-            self.fx1avg += (fx1 - self.fx1avg) / self.numgavg
-        else: # SAMC
-            self.predthetasum = self.thetasum
-            self.thetasum += exp(theta)
-            self.fx0avg = (exp(theta)*fx0 + self.predthetasum * self.fx0avg) / self.thetasum
-            self.fx1avg = (exp(theta)*fx1 + self.predthetasum * self.fx1avg) / self.thetasum
+    def calc_analytic(self, grid_n, grid):
+        # Expectation of C from page 3 eq. 1 using beta conjugate prior
+        ag = (self.fx0.logpdf(grid) - self.fx1.logpdf(grid) \
+                + log(self.Ec) - log(1-self.Ec)).reshape(grid_n,-1)
+        afx0 = self.fx0.logpdf(grid).reshape(grid_n, -1)
+        afx1 = self.fx1.logpdf(grid).reshape(grid_n, -1)
+        return afx0, afx1, ag
+
+    def estimate_sample_means(self, n, grid, db):
+        fxlist = [self.calc_densities(grid,n,x) for x in db]
+        fx0list = np.asarray([x[0] for x in fxlist])
+        fx1list = np.asarray([x[1] for x in fxlist])
+        if self.mhtype=='mh': 
+            fx0avg = np.dstack(fx0list).mean(axis=2)
+            fx1avg = np.dstack(fx1list).mean(axis=2)
+            cmean = db['c'].mean()
+        elif self.mhtype=='samc': 
+            part = np.exp(db['theta'] - db['theta'].max())
+            numerator0 = (part * fx0list).sum(axis=2)
+            numerator1 = (part * fx1list).sum(axis=2)
+            numeratorc = (part * db['c']).sum()
+            denom = part.sum()
+            fx0avg, fx1avg, cmean = numerator0/denom, numerator1/denom, numeratorc/denom
+        else:
+            raise Exception("NOT IMPLEMENTED: Mean calculation for %s method" % self.mhtype)
+        return cmean, fx0avg, fx1avg
 
     def draw_from_true(self, cls, n=100):
         if cls == 0:
@@ -368,11 +368,8 @@ class Classification():
             sigma = self.true['sigma1']
         return np.random.multivariate_normal(mu, sigma, n)
 
-
-def calc_gavg(c,db):
-    fx0, fx1 = c.fx0avg, c.fx1avg
-    cmean = np.array([x[4] for x in db]).mean()
-    return fx0*cmean / (fx1*(1-cmean))
+def calc_gavg(cmean,fx0avg,fx1avg):
+    return fx0avg*cmean / (fx1avg*(1-cmean))
 
 def plot_run(c, db):
     # Plot the data
@@ -380,103 +377,109 @@ def plot_run(c, db):
     splot = p.subplot(2,2,1)
     p.title('Data')
     p.grid(True)
-    n0 = c.n0
-    n = c.n
 
+    # Data Plot
     p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.', label='class 0')
     p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.', label='class 1')
     p.legend(loc='best')
     plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
     plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
-    # Now plot the MCMC run
+    # MCMC Mean Samples Plot
     splot = p.subplot(2,2,2, sharex=splot, sharey=splot)
     p.grid(True)
     p.title('MCMC Mean Samples')
 
     plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
     plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
-    p.plot([x[0][0] for x in db], [x[0][1] for x in db], 'r.', alpha=0.3)
-    p.plot([x[1][0] for x in db], [x[1][1] for x in db], 'g.', alpha=0.3)
+    p.plot(np.vstack(db['mu0'])[:,0], np.vstack(db['mu0'])[:,1], 'r.', alpha=0.3)
+    p.plot(np.vstack(db['mu1'])[:,0], np.vstack(db['mu1'])[:,1], 'g.', alpha=0.3)
 
-    means = calc_means(db)
+    mu0mean = np.vstack(db['mu0']).mean(axis=0)
+    mu1mean = np.vstack(db['mu1']).mean(axis=0)
 
-    p.plot(means[0], means[1], 'ro', markersize=10)
-    p.plot(means[2], means[3], 'go', markersize=10)
+    p.plot(mu0mean[0], mu0mean[1], 'ro', markersize=5)
+    p.plot(mu1mean[0], mu0mean[1], 'go', markersize=5)
 
-    ############
-    cmean = np.array([x[-1] for x in db]).mean()
+    ############ Plot Gavg from mcmc samples
+    grid_n, extent, grid = c.get_grid()
+    cmean, fx0avg, fx1avg = c.estimate_sample_means(grid_n, grid, db) 
+    afx0, afx1, agavg = c.calc_analytic(grid_n, grid)
     
     splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
-    gmin, gmax = c.analyticg.min(), c.analyticg.max()
-    gavg = np.clip(calc_gavg(c,db), np.exp(gmin), np.exp(gmax))
-    p.imshow(np.log(gavg), extent=c.gextent, origin='lower')
+    gmin, gmax = agavg.min(), agavg.max()
+    gavg = np.clip(calc_gavg(cmean, fx0avg, fx1avg), np.exp(gmin), np.exp(gmax))
+    p.imshow(np.log(gavg), extent=extent, origin='lower')
     p.colorbar()
-    p.contour(np.log(gavg), [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
+    p.contour(np.log(gavg), [0.0], extent=extent, origin='lower', cmap = p.cm.gray)
 
-    p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
-    p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
+    p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.')
+    p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.')
     plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
     plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
-    ############
+    ############ Plot analytic G function
     splot = p.subplot(2,2,4, sharex=splot, sharey=splot)
-    p.imshow(c.analyticg, extent=c.gextent, origin='lower')
+    p.imshow(agavg, extent=extent, origin='lower')
     p.colorbar()
-    p.contour(c.analyticg, [0.0], extent=c.gextent, origin='lower', cmap = p.cm.gray)
+    p.contour(agavg, [0.0], extent=extent, origin='lower', cmap = p.cm.gray)
+    p.contour(np.log(gavg), [0.0], extent=extent, origin='lower', cmap = p.cm.gray,
+            linestyles='dotted')
 
-    p.plot(c.data[np.arange(n0),0], c.data[np.arange(n0),1], 'r.')
-    p.plot(c.data[np.arange(n0,c.n),0], c.data[np.arange(n0,c.n),1], 'g.')
+    p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.')
+    p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.')
 
     plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
     plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
 def plot_cross(c,db,ind=None):
+    grid_n, extent, grid = c.get_grid()
+    cmean, fx0avg, fx1avg = c.estimate_sample_means(grid_n, grid, db) 
+    afx0, afx1, agavg = c.calc_analytic(grid_n, grid)
     p.figure()
-    x = c.grid[:c.grid_n,0]
+    x = grid[:grid_n,0]
     p.subplot(3,1,1)
-    i0 = np.argmax(c.analyticfx0.sum(axis=1))
-    i1 = np.argmax(c.analyticfx1.sum(axis=1))
+    i0 = np.argmax(afx0.sum(axis=1))
+    i1 = np.argmax(afx1.sum(axis=1))
 
-    p.plot(x,c.analyticfx0[i0,:], 'r',label='analyticfx0')
-    p.plot(x,np.log(c.fx0avg[i0,:]), 'g', label='avgfx0')
+    p.plot(x,afx0[i0,:], 'r',label='analyticfx0')
+    p.plot(x,np.log(fx0avg[i0,:]), 'g', label='avgfx0')
     p.xlabel('slice at index %d from bottom' % i0)
     p.legend(loc='best')
     p.grid(True)
     p.subplot(3,1,2)
-    p.plot(x,c.analyticfx1[i1,:], 'r',label='analyticfx1')
-    p.plot(x,np.log(c.fx1avg[i1,:]), 'g', label='avgfx1')
+    p.plot(x,afx1[i1,:], 'r',label='analyticfx1')
+    p.plot(x,np.log(fx1avg[i1,:]), 'g', label='avgfx1')
     p.xlabel('slice at index %d from bottom' % i1)
     p.legend(loc='best')
     p.grid(True)
 
     p.subplot(3,1,3)
-    cmean = np.array([y[-1] for y in db]).mean()
     ind = ind if ind else (i0+i1)/2
-    p.plot(x,log(cmean)+np.log(c.fx0avg)[ind,:], 'r', label='avg0')
-    p.plot(x,log(c.Ec)+c.analyticfx0[ind,:], 'r--',label='true0')
-    p.plot(x,log(1-cmean)+np.log(c.fx1avg)[ind,:], 'g', label='avg0')
-    p.plot(x,log(1-c.Ec)+c.analyticfx1[ind,:], 'g--',label='true1')
+    p.plot(x,log(cmean)+np.log(fx0avg)[ind,:], 'r', label='avg0')
+    p.plot(x,log(c.Ec)+afx0[ind,:], 'r--',label='true0')
+    p.plot(x,log(1-cmean)+np.log(fx1avg)[ind,:], 'g', label='avg0')
+    p.plot(x,log(1-c.Ec)+afx1[ind,:], 'g--',label='true1')
     p.xlabel('slice at index %d from bottom' % ind)
     p.legend(loc='best')
     p.grid(True)
 
-def plot_eff(c):
-    p.figure()
-    splot = p.subplot(2,1,1)
-    p.imshow(np.log(c.fx0avg), extent=c.gextent, origin='lower')
-    p.title('fx0')
-    p.colorbar()
-    p.plot(c.data[np.arange(c.n0),0], c.data[np.arange(c.n0),1], 'r.')
-    plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+#def plot_eff(c):
+    #p.figure()
+    #splot = p.subplot(2,1,1)
+    #p.imshow(np.log(c.fx0avg), extent=c.gextent, origin='lower')
+    #p.title('fx0')
+    #p.colorbar()
+    #p.plot(c.data[np.arange(c.n0),0], c.data[np.arange(c.n0),1], 'r.')
+    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
 
-    ############
-    splot = p.subplot(2,1,2, sharex=splot, sharey=splot)
-    p.imshow(np.log(c.fx1avg), extent=c.gextent, origin='lower')
-    p.colorbar()
-    p.title('fx1')
-    p.plot(c.data[np.arange(c.n0,c.n),0], c.data[np.arange(c.n0,c.n),1], 'g.')
-    plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+    #############
+    #splot = p.subplot(2,1,2, sharex=splot, sharey=splot)
+    #p.imshow(np.log(c.fx1avg), extent=c.gextent, origin='lower')
+    #p.colorbar()
+    #p.title('fx1')
+    #p.plot(c.data[np.arange(c.n0,c.n),0], c.data[np.arange(c.n0,c.n),1], 'g.')
+    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
 def plot_ellipse(splot, mean, cov, color):
     v, w = np.linalg.eigh(cov)
@@ -489,34 +492,16 @@ def plot_ellipse(splot, mean, cov, color):
     ell.set_clip_box(splot.bbox)
     ell.set_alpha(0.3)
     splot.add_artist(ell)
-    #splot.set_xticks(())
-    #splot.set_yticks(())
-
-def calc_means(db):
-    n = len(db)
-    arr = np.empty((n,4))
-    for i,rec in enumerate(db):
-        arr[i,0] = rec[0][0]
-        arr[i,1] = rec[0][1]
-        arr[i,2] = rec[1][0]
-        arr[i,3] = rec[1][1]
-
-    return arr.mean(axis=0)
 
 if __name__ == '__main__':
     import samc
     from samcnet.utils import *
     c = Classification()
-
-    #s = samc.SAMCRun(c, burn=1000, stepscale=1000, refden=2)
-    s = MHRun(c, burn=1000)
-
-    p.close('all')
-    
+    s = samc.SAMCRun(c, burn=1000, stepscale=1000, refden=2)
+    #s = MHRun(c, burn=1000)
     s.sample(5e3)
 
-    plot_run(c,mydb)
-    plot_cross(c,mydb)
-    #plot_eff(c)
-
+    p.close('all')
+    plot_run(c,s.db)
+    plot_cross(c,s.db)
     p.show()

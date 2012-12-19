@@ -22,14 +22,6 @@ This software would not be possible without the following components:
 
 ## TODO
 
-1. Estimate class conditional density by
-    1. Discretizing space
-    2. Weighted SAMC average sample densities at each point
-2. Find decision boundary. I think it's enough to:
-    1. Wrap these effective densities in an interpolation function
-    2. Numerically find the intersection between the two classes effective 
-       densities for a predetermined set of x (or y) values.
-3. Then calculate the analytical boundary using Lori's methods
-    1. Plot the two on top of each other
-    2. Quantify the difference? Could do this using true error using the known 
-       ground truth densities.
+I really do regret that there are almost no tests, it is difficult to think how 
+one could/can test non-deterministic algorithms. I'm sure it's been done, but 
+it might be too big of a sidetrack.
