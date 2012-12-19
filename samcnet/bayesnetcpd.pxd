@@ -27,7 +27,7 @@ cdef class BayesNetCPD(BayesNet):
       #object memo_table
       double logqfactor # For RJMCMC weighting of the acceptance probability
       double memo_entropy
-      object dirty, ground
+      object dirty
     cdef:
         vector[Var] pnodes
         vector[vector[ulong]] pdata

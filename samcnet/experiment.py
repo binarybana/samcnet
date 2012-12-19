@@ -1,38 +1,8 @@
+######### Standard Experiment Setup #############
 import sys, os, io, sha, random, logging, logging.handlers, traceback
 from time import time, sleep
 
-import simplejson as js
-import numpy as np
-import scipy as sp
-import networkx as nx
-
 from utils import getHost
-
-sys.path.append('build') # Yuck!
-sys.path.append('.')
-sys.path.append('lib')
-
-def sample(states, 
-        data, 
-        ground, 
-        template=None, 
-        iters=1e4, 
-        priorweight=1.0, 
-        burn=100000, 
-        stepscale=10000, 
-        temperature = 1.0):
-
-    nodes = np.arange(data.shape[1])
-
-    b = BayesNetCPD(states, data, template, priorweight)
-    ground = BayesNetCPD(states, np.array([]))
-    s = SAMCRun(b,burn,stepscale)
-
-    t1 = time()
-    detail = s.sample(iters, temperature)
-    t2 = time()
-    #logger.info("SAMC run took %f seconds." , (t2-t1))
-    return b,s
 
 #if __name__ == "__main__":
 try:
@@ -55,12 +25,11 @@ h = logging.handlers.SysLogHandler((syslog_server,514))
 h.setLevel(level)
 h.setFormatter(formatter)
 
-logger = logging.getLogger(getHost() + '-worker-' + str(os.getpid()))
-
 hstream = logging.StreamHandler()
 hstream.setLevel(level)
 hstream.setFormatter(formatter)
 
+logger = logging.getLogger(getHost() + '-worker-' + str(os.getpid()))
 logger.addHandler(hstream)
 logger.addHandler(h)
 logger.setLevel(level)
@@ -70,7 +39,20 @@ def log_uncaught_exceptions(ex_cls, ex, tb):
     logger.critical('{0}: {1}'.format(ex_cls, ex))
 
 sys.excepthook = log_uncaught_exceptions
+if 'WORKHASH' in os.environ:
+    import redis
+    r = redis.StrictRedis(redis_server)
 logger.info("Beginning Job")
+######### /Standard Experiment Setup #############
+
+sys.path.append('build') # Yuck!
+sys.path.append('.')
+sys.path.append('lib')
+
+import numpy as np
+import scipy as sp
+import networkx as nx
+import simplejson as js
 
 try:
     from samc import SAMCRun
@@ -84,77 +66,36 @@ except ImportError as e:
             " directory is populated by waf.")
     sys.exit()
 
+N = 5
+iters = 5e4
+numdata = 50
+priorweight = 5
+numtemplate = 5
+burn = 1000
+stepscale=30000
+temperature = 1.0
+
+random.seed(123456)
+np.random.seed(123456)
+
+g1 = generateHourGlassGraph(nodes=N)
+data, states, joint = generateData(g1,numdata,method='noisylogic')
+#data, states, joint = generateData(g1,numdata,method='dirichlet')
+template = sampleTemplate(g1, numtemplate)
+
+print joint
+
+random.seed()
+np.random.seed()
+
+ground = BayesNetCPD(states, data, template, ground, priorweight)
+
+b = BayesNetCPD(states, data, template, priorweight)
+s = SAMCRun(b,burn,stepscale)
+s.sample(iters, temperature)
+
+mean = s.estimate_func_mean()
+
+print("Mean is: ", mean)
 if 'WORKHASH' in os.environ:
-    import redis
-    r = redis.StrictRedis(redis_server)
-
-if False: #WBCD Data
-    iters = 3e5
-    data = np.loadtxt('data/WBCD2.dat', np.int)
-    data[:,:-1] -= 1
-    states = np.array([10]*9 + [2],dtype=np.int)
-
-    b,s = sample(states, data, iters=iters)
-    plotHist(s)
-
-if True:
-
-    N = 5
-    iters = 1e4
-    numdata = 50
-    priorweight = 5
-    numtemplate = 5
-    
-    random.seed(123456)
-    np.random.seed(123456)
-
-    g1 = generateHourGlassGraph(nodes=N)
-    #print sp.version.version
-
-    #d1, states1, joint1 = generateData(g1,numdata,method='noisylogic')
-    d1, states1, joint1 = generateData(g1,numdata,method='dirichlet')
-    #print "Ground joint: \n", joint1
-    #print "Effective sample size: %d" % len(set(map(tuple,d1)))
-
-    t1 = sampleTemplate(g1, numtemplate)
-
-    #drawGraphs(g1)
-
-    ###############################################
-    #cProfile.runctx("sample(states1, d1, joint1, template=t1,iters=iters, priorweight=priorweight, burn=0, stepscale=40000)", globals(),locals(), "prof.prof")
-
-    #s = pstats.Stats('prof.prof')
-    #s.strip_dirs().sort_stats("time").print_stats()
-
-    #with statprof.profile():
-        #b,s = sample(states1, d1, g1, template=t1,
-                #iters=iters, priorweight=priorweight, burn=0, stepscale=40000)
-
-    ###############################################
-    b,s = sample(states1, d1, joint1, template=t1,
-            iters=iters, priorweight=priorweight, burn=0, stepscale=30000, temperature=10)
-if 'WORKHASH' in os.environ:
-    mean = s.estimate_func_mean()
     r.lpush('jobs:done:'+os.environ['WORKHASH'], mean)
-
-
-    #es = []
-    #newes = []
-    #for i in range(20):
-        #es.append(s.estimate_func_mean())
-        #newes.append(s.estimate_func_mean(trunc=True))
-        #s.sample(1e4)
-    ###############################################
-
-    #print "##### wotemp - wtemp = %f - %f = %f #######" % (mean1, mean2, mean1-mean2)
-
-    #b.update_graph(s.mapvalue)
-    #b2.update_graph(s2.mapvalue)
-    #drawGraphs(g1, t1)
-
-    #val1 = b.global_edge_presence()
-    #val2 = b2.global_edge_presence()
-
-    #print('Global edge error: %f' % mean1)
-    #print('Map edge error: %f' % val1)
-

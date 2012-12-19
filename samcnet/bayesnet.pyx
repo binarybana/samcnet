@@ -17,13 +17,14 @@ cdef class BayesNet:
     def __cinit__(self, *args, **kwargs):
         pass
     
-    def __init__(self, states, data, template=None, priorweight=1.0):
+    def __init__(self, states, data, template=None, ground=None, priorweight=1.0):
         """
         nodes: a list of strings for the nodes
         states: a list of number of states for each node
         data: a matrix with each row being a draw from the Bayesian network 
             with each entry being [0..n_i-1]
-        template: A matrix of doubles \in[0,1.0] giving strength to the various connections
+        template: A networkx graph of the prior information
+        ground: A (networkx graph, joint distribution) tuple of the ground truth
         Initializes the BayesNet as a set of independent nodes
         """
         self.states = np.asarray(states,dtype=np.int32)
@@ -41,6 +42,8 @@ cdef class BayesNet:
         self.node_num = self.states.shape[0]
 
         # Template and Ground truth networks
+        self.ground = ground
+
         if template == None:
             self.gtemplate = None
             self.ntemplate = np.zeros((self.node_num, self.node_num), dtype=np.double)
@@ -86,16 +89,16 @@ cdef class BayesNet:
         else:
             raise Exception("DB not initialized!")
 
-    def global_edge_presence(self, ground_truth=None):
-        if ground_truth == None:
+    def global_edge_presence(self):
+        if self.ground == None:
             return np.nan
         else:
             s = self.x.argsort()
             ordmat = self.mat[s].T[s].T
-            return np.abs(ground_truth - ordmat).sum() / self.x.shape[0]**2
+            return np.abs(ground - ordmat).sum() / self.x.shape[0]**2
 
-    def save_to_db(self, db, theta, energy, i, ground_truth=None):
-        func = self.global_edge_presence(ground_truth)
+    def save_to_db(self, db, theta, energy, i):
+        func = self.global_edge_presence()
         assert db is not None, 'DB None when trying to save sample.'
         db[i] = np.array([theta, energy, func])
 

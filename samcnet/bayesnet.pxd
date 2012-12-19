@@ -4,7 +4,7 @@ cdef class BayesNet:
     cdef public:
         object nodes,states,data,graph,x,mat,fvalue,changelist,table
         object oldmat, oldx, oldfvalue
-        object gtemplate, ntemplate, groundgraph, ngroundgraph
+        object gtemplate, ntemplate, ground
         int limparent, data_num, node_num, changelength
         double prior_alpha, prior_gamma
     cdef:

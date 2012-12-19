@@ -58,10 +58,10 @@ cdef class BayesNetCPD(BayesNet):
         self.memo_entropy = 0.0
         self.dirty = True
     
-    def __init__(self, states, data, intemplate=None, priorweight=1.0, ground=None):
+    def __init__(self, states, data, template=None, ground=None, priorweight=1.0, gold=False):
         cdef int i, j
         nodes = np.arange(states.shape[0])
-        BayesNet.__init__(self, states, data, intemplate, priorweight)
+        BayesNet.__init__(self, states, data, template, ground, priorweight)
 
         cdef vector[Factor] facvector
 
@@ -70,16 +70,21 @@ cdef class BayesNetCPD(BayesNet):
             facvector.push_back(Factor(self.pnodes.back()))
 
         self.fg = FactorGraph(facvector)
-        self.ground = ground
 
         self.logqfactor = 0.0
-        #self.memo_table = MemoCounter(data)
         if data.size:
             for i in range(data.shape[0]): 
                 self.pdata.push_back(vector[ulong]())
                 for j in range(data.shape[1]):
                     self.pdata[i].push_back(data[i,j])
-        
+
+        if gold: 
+            ## TODO
+            use adjust factors
+            and then manually set the parameters from the joint distribution
+            ... basically just converting from joint distribution to Factors in libdai
+            hmm... have I done this before?
+
     def update_graph(self, matx=None):
         """
         Update the networkx graph from either the current state, or pass 
@@ -99,7 +104,6 @@ cdef class BayesNetCPD(BayesNet):
 
         Also see self.update_graph
         """
-
         raise Exception("Not Implemented")
 
     def copy(self):
@@ -120,54 +124,12 @@ cdef class BayesNetCPD(BayesNet):
         """
         IF DEBUG:
             print "Energy top"
-        #cdef float alphaik,alphaijk,sum,priordiff,accum = 0.0
-        #cdef int i,node,j,l,parstate
         cdef np.ndarray[np.int32_t, ndim=1, mode="c"] x = \
                 self.x
-        #cdef np.ndarray[np.int32_t, ndim=1, mode="c"] states = \
-                #self.states
         cdef np.ndarray[np.double_t, ndim=2, mode="c"] ntemplate = \
                 self.ntemplate
         cdef np.ndarray[np.int32_t, ndim=2, mode="c"] mat = \
                 self.mat
-
-        #lut = self.x.argsort()
-        
-        #for i in range(self.changelength):
-            #node = self.changelist[i]
-            #cpd = self.joint.dists[x[node]]
-            #pdomain = cpd.parent_domain
-
-            ##print("NEW ENERGY LOOP:")
-            ##print self.joint
-            ##print(node, self.x[node], cpd.name, cpd.params, self.changelist, pdomain, id(pdomain))
-
-            #par_node_cols = lut[pdomain.keys() + [x[node]]]
-            #node_par_counts = self.memo_table.lookup(tuple(par_node_cols))
-
-            #parstate = 1
-            #for j in range(0,node):
-                #if mat[j,node]==1:
-                   #parstate *= states[x[j]]
-
-            #alphaijk=self.prior_alpha/parstate/states[x[node]]
-            #alphaik=self.prior_alpha/parstate
-            
-            #accum = 0.0
-            #accum -= states[x[node]]*parstate*lgamma(alphaijk)
-            #accum += parstate*lgamma(alphaik)
-
-            #for pval in fast_space_iterator(pdomain):
-                #fastp = cpd.fastp(pval)
-                #for j in range(0,cpd.arity-1):
-                    ##print j, fastp, pval, pdomain, alphaijk, node_par_counts
-                    #accum += (node_par_counts[pval + (j,)] + alphaijk -1) * log(fastp[j])
-                #accum += (node_par_counts[pval + (cpd.arity-1,)] + alphaijk -1) * log((1 - fastp.sum()))
-
-            #self.fvalue[i] = accum;
-            # WAT?! How can this i index possibly be right? it should be node
-            # or x[node] right?!?
-            #self.fvalue[i] *= -1.0;
 
         cdef int i,j,node,data,index,arity,parstate,state
         cdef double sum, priordiff, accum, accumgold
@@ -208,10 +170,6 @@ cdef class BayesNetCPD(BayesNet):
             self.fvalue[node] = -1.0 * accum
 
         sum = self.fvalue.sum()
-
-        # Gold standard
-        #for i in range(self.pdata.size()):
-            #accumgold -= self.fg.logScore(self.pdata[i])
 
         IF DEBUG:
             print "energy bottom. energy: %f" % accum
