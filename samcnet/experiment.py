@@ -66,31 +66,34 @@ except ImportError as e:
             " directory is populated by waf.")
     sys.exit()
 
-N = 5
-iters = 5e4
-numdata = 50
+############### /SAMC Setup ############### 
+
+N = 4
+iters = 1e3
+numdata = 20
 priorweight = 5
 numtemplate = 5
-burn = 1000
+burn = 10
 stepscale=30000
 temperature = 1.0
 
 random.seed(123456)
 np.random.seed(123456)
 
-g1 = generateHourGlassGraph(nodes=N)
-data, states, joint = generateData(g1,numdata,method='noisylogic')
-#data, states, joint = generateData(g1,numdata,method='dirichlet')
-template = sampleTemplate(g1, numtemplate)
+groundgraph = generateHourGlassGraph(nodes=N)
+data, states, joint = generateData(groundgraph,numdata,method='noisylogic')
+#data, states, joint = generateData(groundgraph,numdata,method='dirichlet')
+template = sampleTemplate(groundgraph, numtemplate)
 
+print "Joint:"
 print joint
 
 random.seed()
 np.random.seed()
 
-ground = BayesNetCPD(states, data, template, ground, priorweight)
+ground = BayesNetCPD(states, data, template, ground=joint, priorweight=priorweight, gold=True)
 
-b = BayesNetCPD(states, data, template, priorweight)
+b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight)
 s = SAMCRun(b,burn,stepscale)
 s.sample(iters, temperature)
 

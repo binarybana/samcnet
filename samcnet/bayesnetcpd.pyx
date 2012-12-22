@@ -59,17 +59,12 @@ cdef class BayesNetCPD(BayesNet):
         self.dirty = True
     
     def __init__(self, states, data, template=None, ground=None, priorweight=1.0, gold=False):
-        cdef int i, j
+        cdef int i, j, k, l
+        cdef Factor tempfactor
+        cdef VarSet tempvarset, parset
+        cdef map[Var, size_t] mapstate
         nodes = np.arange(states.shape[0])
         BayesNet.__init__(self, states, data, template, ground, priorweight)
-
-        cdef vector[Factor] facvector
-
-        for name,arity in zip(nodes,states):
-            self.pnodes.push_back(Var(name, arity))
-            facvector.push_back(Factor(self.pnodes.back()))
-
-        self.fg = FactorGraph(facvector)
 
         self.logqfactor = 0.0
         if data.size:
@@ -78,12 +73,41 @@ cdef class BayesNetCPD(BayesNet):
                 for j in range(data.shape[1]):
                     self.pdata[i].push_back(data[i,j])
 
-        if gold: 
-            ## TODO
-            use adjust factors
-            and then manually set the parameters from the joint distribution
-            ... basically just converting from joint distribution to Factors in libdai
-            hmm... have I done this before?
+        cdef vector[Factor] facvector
+        if not gold:
+            for name,arity in zip(nodes,states):
+                self.pnodes.push_back(Var(name, arity))
+                facvector.push_back(Factor(self.pnodes.back()))
+        else: 
+            # Assume for the moment that ground is a JointDistribution
+            # TODO Fix this by changing generator to actually generate a proper
+            # BayesNetCPD
+            totuple = []
+            for name,arity in zip(nodes,states):
+                self.pnodes.push_back(Var(name, arity))
+            for i, dist in ground.dists.iteritems():
+                tempvarset = VarSet(self.pnodes[i])
+                parset = VarSet()
+                for j in dist.sorted_parent_names:
+                    tempvarset.insert(self.pnodes[j])
+                    parset.insert(self.pnodes[j])
+                
+                tempfactor = Factor(tempvarset)
+                for j in range(dai.BigInt_size_t(parset.nrStates())):
+                    mapstate = calcState(parset, j)
+                    totuple = []
+                    for l in dist.sorted_parent_names:
+                        totuple.append(mapstate[self.pnodes[l]])
+                    for k in range(states[i]):
+                        mapstate[self.pnodes[i]] = k
+                        if k == states[i]-1:
+                            tempfactor.set(calcLinearState(tempvarset, mapstate), 
+                                    1 - np.sum(ground.dists[i].fastp(tuple(totuple))))
+                        else:
+                            tempfactor.set(calcLinearState(tempvarset, mapstate), ground.dists[i].fastp(tuple(totuple))[k])
+                facvector.push_back(tempfactor)
+
+        self.fg = FactorGraph(facvector)
 
     def update_graph(self, matx=None):
         """
