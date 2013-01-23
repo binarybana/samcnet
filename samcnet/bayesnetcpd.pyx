@@ -135,11 +135,15 @@ cdef class BayesNetCPD(BayesNet):
 
     def save_to_db(BayesNetCPD self, object db, double theta, double energy, int iteration):
         if self.ground:
-            func = self.ground.kld(self)
+            kld = self.ground.kld(self)
+            entropy = self.entropy()
+            func = (entropy,kld)
         else:
             func = 0.0
         assert db is not None, 'DB None when trying to save sample.'
-        db[iteration] = np.array([theta, energy, func])
+        db[iteration][0] = theta
+        db[iteration][1] = energy
+        db[iteration][2] = func
 
     #@cython.boundscheck(False)
     def energy(self):
@@ -263,6 +267,8 @@ cdef class BayesNetCPD(BayesNet):
         return -self.memo_entropy - accum
 
     def entropy(self):
+        if not self.dirty:
+            return self.memo_entropy
         cdef PropertySet ps = PropertySet('[updates=HUGIN]')
         cdef int i,parstate,state,arity,numparstates
         cdef double accum, accumsub, temp
@@ -285,6 +291,7 @@ cdef class BayesNetCPD(BayesNet):
                 accum += marginal[parstate] * accumsum
 
         self.dirty = False
+        self.memo_entropy = accum
         return accum
 
     def naive_entropy(self):

@@ -87,14 +87,48 @@ cdef class SAMCRun:
         self.accept_loc = 0
         self.total_loc = 0
 
-    def estimate_func_mean(self, trunc=None):
+    def func_cummean(self, accessor=None):
+        """ 
+        Using the function of interest in the object, compute the cumulative mean of the function
+        on the random weighted samples.
+
+        If accessor is given, then it is a function which pulls out the quantity of interest from
+        db['funcs'].
+        """
+        assert self.db != None, 'db not initialized'
+        assert len(self.db) != 0, 'Length of db is zero! Perhaps you have not "\
+                "proceeded beyond the burn-in period'
+
+        thetas = self.db['thetas']
+        if accessor == None:
+            funcs = self.db['funcs']
+        else:
+            funcs = np.vectorize(accessor)(self.db['funcs'])
+
+        part = np.exp(thetas - thetas.max())
+        numerator = (part * funcs).cumsum()
+        denom = part.cumsum()
+        return numerator / denom
+
+    def func_mean(self, trunc=None, accessor=None):
         """ 
         Using the function of interest in the object, estimate the mean of the function
         on the random weighted samples.
+
+        If trunc is given, then it gives the proportion of samples (in descending order by theta) 
+        to discard.
+
+        If accessor is given, then it is a function which pulls out the quantity of interest from
+        db['funcs'].
         """
-        assert self.db != None
+        assert self.db != None, 'db not initialized'
+        assert len(self.db) != 0, 'Length of db is zero! Perhaps you have not "\
+                "proceeded beyond the burn-in period'
         thetas = self.db['thetas']
-        assert thetas.shape[0] != 0
+        if accessor == None:
+            funcs = self.db['funcs']
+        else:
+            funcs = np.vectorize(accessor)(self.db['funcs'])
 
         if trunc:
             num = len(self.db)/trunc
@@ -104,11 +138,10 @@ cdef class SAMCRun:
         part = np.exp(thetas - thetas.max())
 
         if trunc:
-            numerator = (part * self.db['funcs'][grab]).sum()
+            numerator = (part * funcs[grab]).sum()
         else:
-            numerator = (part * self.db['funcs']).sum()
+            numerator = (part * funcs).sum()
         denom = part.sum()
-        #print "Calculating function mean: %g / %g = %g." % (numerator, denom, numerator/denom)
         return numerator / denom
 
     cdef find_region(self, energy):

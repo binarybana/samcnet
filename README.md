@@ -25,3 +25,7 @@ This software would not be possible without the following components:
 I really do regret that there are almost no tests, it is difficult to think how 
 one could/can test non-deterministic algorithms. I'm sure it's been done, but 
 it might be too big of a sidetrack.
+
+Also, I'm still waiting to figure out what [this 
+warning](https://groups.google.com/forum/?fromgroups=#!topic/libdai/MbzCZJD1l_I) 
+may mean, but for now I've commented out the code that emits the warning.

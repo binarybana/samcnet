@@ -80,7 +80,7 @@ cdef class BayesNet:
     def init_db(self, db, size, method):
         dtype = [('thetas',np.double),
                  ('energies',np.double),
-                 ('funcs',np.double)]
+                 ('funcs',np.object)]
         assert method == 'samc'
         if db == None:
             return np.zeros(size, dtype=dtype)

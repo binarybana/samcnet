@@ -1,49 +1,6 @@
-######### Standard Experiment Setup #############
-import sys, os, io, sha, random, logging, logging.handlers, traceback
-from time import time, sleep
-
-from utils import getHost
-
-#if __name__ == "__main__":
-try:
-    syslog_server = os.environ['SYSLOG']
-except:
-    print "ERROR in worker: Need SYSLOG environment variable defined."
-    sys.exit(1)
-try:
-    if 'WORKHASH' in os.environ:
-        redis_server = os.environ['REDIS']
-except:
-    print "ERROR in worker: Need REDIS environment variable defined."
-    sys.exit(1)
-
-formatter = logging.Formatter('%(name)s: samc %(levelname)s %(message)s')
-
-level = logging.WARNING
-
-h = logging.handlers.SysLogHandler((syslog_server,514))
-h.setLevel(level)
-h.setFormatter(formatter)
-
-hstream = logging.StreamHandler()
-hstream.setLevel(level)
-hstream.setFormatter(formatter)
-
-logger = logging.getLogger(getHost() + '-worker-' + str(os.getpid()))
-logger.addHandler(hstream)
-logger.addHandler(h)
-logger.setLevel(level)
-
-def log_uncaught_exceptions(ex_cls, ex, tb):
-    logger.critical(''.join(traceback.format_tb(tb)))
-    logger.critical('{0}: {1}'.format(ex_cls, ex))
-
-sys.excepthook = log_uncaught_exceptions
-if 'WORKHASH' in os.environ:
-    import redis
-    r = redis.StrictRedis(redis_server)
-logger.info("Beginning Job")
-######### /Standard Experiment Setup #############
+import sys, os, random
+############### SAMC Setup ############### 
+print "Starting job"
 
 sys.path.append('build') # Yuck!
 sys.path.append('.')
@@ -60,21 +17,25 @@ try:
     from bayesnetcpd import BayesNetCPD
     from generator import *
 except ImportError as e:
-    logger.critical(e)
-    logger.critical(sys.path)
-    logger.critical("Make sure LD_LIBRARY_PATH is set correctly and that the build"+\
-            " directory is populated by waf.")
-    sys.exit()
+    sys.exit("Make sure LD_LIBRARY_PATH is set correctly and that the build"+\
+            " directory is populated by waf.\n\n %s" % str(e))
 
+if 'WORKHASH' in os.environ:
+    try:
+        redis_server = os.environ['REDIS']
+        import redis
+        r = redis.StrictRedis(redis_server)
+    except:
+        sys.exit("ERROR in worker: Need REDIS environment variable defined.")
 ############### /SAMC Setup ############### 
 
-N = 4
-iters = 1e3
+N = 7
+iters = 1e5
 numdata = 20
 priorweight = 5
 numtemplate = 5
-burn = 10
-stepscale=30000
+burn = 10000
+stepscale=100000
 temperature = 1.0
 
 random.seed(123456)
@@ -97,8 +58,16 @@ b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight)
 s = SAMCRun(b,burn,stepscale)
 s.sample(iters, temperature)
 
-mean = s.estimate_func_mean()
+entropy_mean = s.func_mean(accessor = lambda x: x[0])
+entropy_cummean = s.func_cummean(accessor = lambda x: x[0])
 
-print("Mean is: ", mean)
+kld_mean = s.func_mean(accessor = lambda x: x[1])
+kld_cummean = s.func_cummean(accessor = lambda x: x[1])
+
+print("KLD Mean is: ", kld_mean)
+print("Entropy Mean is: ", entropy_mean)
+
+res = (entropy_mean, kld_mean, entropy_cummean.tostring(), kld_cummean.tostring())
+
 if 'WORKHASH' in os.environ:
-    r.lpush('jobs:done:'+os.environ['WORKHASH'], mean)
+    r.lpush('jobs:done:'+os.environ['WORKHASH'], js.dumps(res))
