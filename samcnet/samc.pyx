@@ -13,8 +13,8 @@ cdef class SAMCRun:
     cdef public:
         object obj, db, refden, hist, mapvalue
         int lowEnergy, highEnergy, grid, accept_loc, total_loc, iteration, burn, stepscale
-        double rho, tau, mapenergy, delta, scale, refden_power, temperature
-    def __init__(self, obj, burn=100000, stepscale = 10000, refden=0.0, temperature=1.0):
+        double rho, tau, mapenergy, delta, scale, refden_power
+    def __init__(self, obj, burn=100000, stepscale = 10000, refden=0.0, thin=1):
 
         self.obj = obj # Going to be a BayesNet for now, but we'll keep it general
         self.clear()
@@ -28,7 +28,7 @@ cdef class SAMCRun:
         self.burn = burn
         self.stepscale = stepscale
         self.refden_power = refden
-        self.temperature = temperature
+        self.thin = thin
 
     def set_energy_limits(self):
         cdef int i
@@ -191,7 +191,7 @@ cdef class SAMCRun:
 
             newregion = self.find_region(newenergy)
 
-            r = hist[oldregion] - hist[newregion] + (oldenergy-newenergy) /temperature
+            r = hist[oldregion] - hist[newregion] + (oldenergy-newenergy) #/temperature
             
             if r > 0.0 or np.random.rand() < exp(r):
                 accept=1
@@ -214,7 +214,7 @@ cdef class SAMCRun:
             locfreq[oldregion] -= 1
 
 
-            if current_iter >= self.burn:
+            if current_iter >= self.burn and current_iter % self.thin == 0:
                 self.obj.save_to_db(self.db, 
                         hist[oldregion], 
                         oldenergy, 

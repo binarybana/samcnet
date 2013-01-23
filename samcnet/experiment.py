@@ -32,13 +32,15 @@ if 'WORKHASH' in os.environ:
 ############### /SAMC Setup ############### 
 
 N = 7
-iters = 1e5
+iters = 6e5
 numdata = 20
 priorweight = 5
 numtemplate = 5
-burn = 10000
+burn = 100000
 stepscale=100000
 temperature = 1.0
+thin = 100
+refden = 0.0
 
 random.seed(123456)
 np.random.seed(123456)
@@ -57,7 +59,7 @@ np.random.seed()
 ground = BayesNetCPD(states, data, template, ground=joint, priorweight=priorweight, gold=True)
 
 b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight)
-s = SAMCRun(b,burn,stepscale)
+s = SAMCRun(b,burn,stepscale,refden,thin)
 s.sample(iters, temperature)
 
 entropy_mean = s.func_mean(accessor = lambda x: x[0])
