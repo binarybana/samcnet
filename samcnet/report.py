@@ -14,8 +14,16 @@ def load_data(s):
 
 r = redis.StrictRedis('localhost')
 
-done = r.keys('jobs:done:*')
-datastrings = r.lrange(done[0], 0, -1)
+done_hashes = r.keys('jobs:done:*')
+
+for i, d in enumerate(done_hashes):
+    desc = r.hget('jobs:descs', d[10:]) or ''
+    print "%4d. %s %s" % (i, d[10:18], desc)
+
+sel = int(input("Choose a dataset: "))
+assert sel in range(i+1), "Not a valid dataset selector"
+
+datastrings = r.lrange(done_hashes[sel], 0, -1)
 
 for d in datastrings:
     res = load_data(d)
@@ -27,7 +35,13 @@ for d in datastrings:
     print("KLD Mean is: %s" % kld_mean)
     print("Entropy Mean is: %s" % entropy_mean)
 
-    p.plot(entropy_cummean)
+    ent = p.plot(entropy_cummean, 'r', alpha=0.3, label='Entropy')
+    kld = p.plot(kld_cummean, 'g', alpha=0.3, label='KLD from true')
 
 p.ylim(0, 7)
+p.xlabel('Iterations after burnin')
+p.ylabel('nats')
+p.grid(True)
+p.legend([ent[0], kld[0]], ["Entropy", "KLD from true"], loc='best')
+
 p.show()
