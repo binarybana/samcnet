@@ -12,7 +12,7 @@ cimport numpy as np
 cdef class SAMCRun:
     cdef public:
         object obj, db, refden, hist, mapvalue
-        int lowEnergy, highEnergy, grid, accept_loc, total_loc, iteration, burn, stepscale
+        int lowEnergy, highEnergy, grid, accept_loc, total_loc, iteration, burn, stepscale, thin
         double rho, tau, mapenergy, delta, scale, refden_power
     def __init__(self, obj, burn=100000, stepscale = 10000, refden=0.0, thin=1):
 
@@ -167,7 +167,7 @@ cdef class SAMCRun:
         oldenergy = self.obj.energy()
         oldregion = self.find_region(oldenergy) # AKA nonempty
 
-        dbsize = self.iteration + int(iters) - self.burn
+        dbsize = (self.iteration + int(iters) - self.burn)//self.thin
         if dbsize < 0:
             dbsize = 0
         self.db = self.obj.init_db(self.db, dbsize, 'samc')
@@ -218,7 +218,7 @@ cdef class SAMCRun:
                 self.obj.save_to_db(self.db, 
                         hist[oldregion], 
                         oldenergy, 
-                        current_iter-self.burn)
+                        (current_iter-self.burn)//self.thin)
 
             if self.iteration % 10000 == 0:
                 print("Iteration: %8d, delta: %5.2f, best energy: %7g, current energy: %7g" % \
