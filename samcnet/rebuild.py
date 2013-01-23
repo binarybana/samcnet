@@ -1,7 +1,5 @@
 import sys, os, random
 ############### SAMC Setup ############### 
-print "Starting job"
-
 sys.path.append('build') # Yuck!
 sys.path.append('.')
 sys.path.append('lib')
@@ -10,8 +8,6 @@ import numpy as np
 import scipy as sp
 import networkx as nx
 import simplejson as js
-import base64
-import zlib
 
 try:
     from samc import SAMCRun
@@ -31,13 +27,13 @@ if 'WORKHASH' in os.environ:
         sys.exit("ERROR in worker: Need REDIS environment variable defined.")
 ############### /SAMC Setup ############### 
 
-N = 7
-iters = 1e5
+N = 5
+iters = 1e2
 numdata = 20
 priorweight = 5
 numtemplate = 5
-burn = 10000
-stepscale=100000
+burn = 10
+stepscale=30000
 temperature = 1.0
 
 random.seed(123456)
@@ -60,21 +56,8 @@ b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight)
 s = SAMCRun(b,burn,stepscale)
 s.sample(iters, temperature)
 
-entropy_mean = s.func_mean(accessor = lambda x: x[0])
-entropy_cummean = s.func_cummean(accessor = lambda x: x[0])
+mean = s.estimate_func_mean()
 
-kld_mean = s.func_mean(accessor = lambda x: x[1])
-kld_cummean = s.func_cummean(accessor = lambda x: x[1])
-
-print("KLD Mean is: ", kld_mean)
-print("Entropy Mean is: ", entropy_mean)
-
-def encode_array(a):
-    return base64.b64encode(a.tostring())
-def prepare_data(d):
-    return zlib.compress(js.dumps(d),9)
-
-res = prepare_data((entropy_mean, kld_mean, encode_array(entropy_cummean), encode_array(kld_cummean)))
-
+print("Mean is: ", mean)
 if 'WORKHASH' in os.environ:
-    r.lpush('jobs:done:'+os.environ['WORKHASH'], res)
+    r.lpush('jobs:done:'+os.environ['WORKHASH'], mean)
