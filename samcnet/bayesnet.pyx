@@ -94,8 +94,9 @@ cdef class BayesNet:
             return np.nan
         else:
             s = self.x.argsort()
+            sg = self.ground.x.argsort()
             ordmat = self.mat[s].T[s].T
-            return np.abs(self.ground - ordmat).sum() / self.x.shape[0]**2
+            return float(np.abs(self.ground.mat[sg].T[sg].T - ordmat).sum()) / self.x.shape[0]**2
 
     def save_to_db(self, db, theta, energy, i):
         func = self.global_edge_presence()
