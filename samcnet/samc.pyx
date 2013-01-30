@@ -30,6 +30,8 @@ cdef class SAMCRun:
         self.refden_power = refden
         self.thin = thin
 
+        self.db = None
+
     def set_energy_limits(self):
         cdef int i
         cdef double oldenergy, energy, low, high, spread
@@ -86,6 +88,12 @@ cdef class SAMCRun:
         self.iteration = 0
         self.accept_loc = 0
         self.total_loc = 0
+
+    def save_to_db(self, double theta, double energy, int iteration):
+        assert self.db is not None, 'DB None when trying to save sample.'
+        self.db[iteration][0] = theta
+        self.db[iteration][1] = energy
+        self.db[iteration][2] = self.obj.save_to_db()
 
     def func_cummean(self, accessor=None):
         """ 
@@ -154,6 +162,18 @@ cdef class SAMCRun:
             i = <int> floor((energy-self.lowEnergy)/self.scale)
             return i if i<self.grid else self.grid-1
 
+    def init_db(self, size):
+        dtype = [('thetas',np.double),
+                 ('energies',np.double),
+                 ('funcs',np.object)]
+        if self.db == None:
+            self.db = np.zeros(size, dtype=dtype)
+        elif self.db.shape[0] != size:
+            self.db = np.resize(self.db, size)
+        else:
+            raise Exception("DB not initialized!")
+
+
     #@cython.boundscheck(False) # turn off bounds-checking for entire function
     def sample(self, int iters, double temperature = 1.0):
         cdef int current_iter, accept, oldregion, newregion, i, nonempty, dbsize
@@ -170,9 +190,8 @@ cdef class SAMCRun:
         dbsize = (self.iteration + int(iters) - self.burn)//self.thin
         if dbsize < 0:
             dbsize = 0
-        self.db = self.obj.init_db(self.db, dbsize, 'samc')
+        self.init_db(dbsize)
         
-        #func_detail = np.empty(dbsize/100, dtype=np.double)
         print("Initial Energy: %g" % oldenergy)
 
         for current_iter in range(self.iteration, self.iteration + int(iters)):
@@ -213,19 +232,14 @@ cdef class SAMCRun:
             hist += self.delta*(locfreq-refden)
             locfreq[oldregion] -= 1
 
-
             if current_iter >= self.burn and current_iter % self.thin == 0:
-                self.obj.save_to_db(self.db, 
-                        hist[oldregion], 
-                        oldenergy, 
-                        (current_iter-self.burn)//self.thin)
+                self.save_to_db(hist[oldregion], 
+                                oldenergy, 
+                                (current_iter-self.burn)//self.thin)
 
             if self.iteration % 10000 == 0:
                 print("Iteration: %8d, delta: %5.2f, best energy: %7g, current energy: %7g" % \
                         (self.iteration, self.delta, self.mapenergy, newenergy))
-
-            #if self.iteration % 100 == 0:
-                #func_detail[current_iter/100] = self.estimate_func_mean()
 
         self.hist[1] = hist
 
@@ -233,6 +247,4 @@ cdef class SAMCRun:
         print("Accept_loc: %d" % self.accept_loc)
         print("Total_loc: %d" % self.total_loc)
         print("Acceptance: %f" % (float(self.accept_loc)/float(self.total_loc)))
-
-        #return func_detail
 

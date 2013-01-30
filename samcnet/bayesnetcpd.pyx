@@ -22,19 +22,6 @@ cdef extern from "utils.h":
     string crepr(Factor &)
     string crepr(VarSet &)
 
-cdef class MemoCounter:
-    def __init__(self, data):
-        self.memo_table = {}
-        self.data = data
-
-    def lookup(self, config):
-        if config in self.memo_table:
-            return self.memo_table[config]
-        else:
-            c = Counter(tuple(x[np.array(config,dtype=np.int)]) for x in self.data)
-            self.memo_table[config] = c
-            return c
-
 DEF DEBUG=0
 
 cdef class BayesNetCPD(BayesNet):
@@ -106,42 +93,22 @@ cdef class BayesNetCPD(BayesNet):
 
         self.fg = FactorGraph(facvector)
 
-    def update_graph(self, matx=None):
-        """
-        Update the networkx graph from either the current state, or pass 
-        in a 2-tuple of (matrix,vector) with the adjacency matrix and the 
-        node values.
-
-        See self.update_matrix as well.
-        """
-        raise Exception("Not Implemented")
-
-    def update_matrix(self, graph):
-        """ 
-        From a networkx graph, update the internal representation of the graph
-        (an adjacency matrix and node list).
-
-        TODO: What should we do about CPDs here? Uniform again?
-
-        Also see self.update_graph
-        """
-        raise Exception("Not Implemented")
-
     def copy(self):
+        """ Create a copy of myself for suitable use later """
         return (self.mat.copy(), self.x.copy(), 0 )# self.fg.clone()) # need to wrap this
 
-    def save_to_db(BayesNetCPD self, object db, double theta, double energy, int iteration):
+    def save_to_db(self):
+        """ Return a python object that contains all quantities of interest for
+        later analysis """ 
         if self.ground:
             kld = self.ground.kld(self)
             entropy = self.entropy()
             edge_score = self.global_edge_presence()
             func = (entropy,kld,edge_score)
         else:
-            func = 0.0
-        assert db is not None, 'DB None when trying to save sample.'
-        db[iteration][0] = theta
-        db[iteration][1] = energy
-        db[iteration][2] = func
+            entropy = self.entropy()
+            func = (entropy,)
+        return func
 
     #@cython.boundscheck(False)
     def energy(self):

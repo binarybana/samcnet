@@ -77,18 +77,6 @@ cdef class BayesNet:
         #"""
         #pass
 
-    def init_db(self, db, size, method):
-        dtype = [('thetas',np.double),
-                 ('energies',np.double),
-                 ('funcs',np.object)]
-        assert method == 'samc'
-        if db == None:
-            return np.zeros(size, dtype=dtype)
-        elif db.shape[0] != size:
-            return np.resize(db, size)
-        else:
-            raise Exception("DB not initialized!")
-
     def global_edge_presence(self):
         if self.ground == None:
             return np.nan
@@ -98,10 +86,8 @@ cdef class BayesNet:
             ordmat = self.mat[s].T[s].T
             return float(np.abs(self.ground.mat[sg].T[sg].T - ordmat).sum()) / self.x.shape[0]**2
 
-    def save_to_db(self, db, theta, energy, i):
-        func = self.global_edge_presence()
-        assert db is not None, 'DB None when trying to save sample.'
-        db[i] = np.array([theta, energy, func])
+    def save_to_db(self):
+        return self.global_edge_presence()
 
     def update_graph(self, matx=None):
         """
