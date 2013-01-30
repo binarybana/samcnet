@@ -1,5 +1,7 @@
 import sys, os, random
 ############### SAMC Setup ############### 
+print "Starting job"
+
 sys.path.append('build') # Yuck!
 sys.path.append('.')
 sys.path.append('lib')
@@ -8,6 +10,7 @@ import numpy as np
 import scipy as sp
 import networkx as nx
 import simplejson as js
+import samcnet.utils as utils
 
 try:
     from samc import SAMCRun
@@ -27,14 +30,16 @@ if 'WORKHASH' in os.environ:
         sys.exit("ERROR in worker: Need REDIS environment variable defined.")
 ############### /SAMC Setup ############### 
 
-N = 5
-iters = 1e2
+N = 7
+iters = 1e4
 numdata = 20
 priorweight = 5
 numtemplate = 5
-burn = 10
-stepscale=30000
-temperature = 1.0
+burn = 100
+stepscale=100000
+temperature = 100.0
+thin = 10
+refden = 0.0
 
 random.seed(123456)
 np.random.seed(123456)
@@ -53,11 +58,28 @@ np.random.seed()
 ground = BayesNetCPD(states, data, template, ground=joint, priorweight=priorweight, gold=True)
 
 b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight)
-s = SAMCRun(b,burn,stepscale)
+s = SAMCRun(b,burn,stepscale,refden,thin)
 s.sample(iters, temperature)
 
-mean = s.estimate_func_mean()
+res = []
+for acc in [lambda x: x[0], lambda x: x[1], lambda x: x[2]]:
+    for get in [s.func_mean, s.func_cummean]:
+        res.append(get(acc))
 
-print("Mean is: ", mean)
+res_wire = utils.prepare_data([utils.encode_entry(x) for x in res])
+
+print("KLD Mean is: ", res[0])
+print("Entropy Mean is: ", res[2])
+print("Edge distance Mean is: ", res[4])
+
+print("Entropy Cummean len/min/max:")
+print res[1].size, res[1].min(), res[1].max()
+
+print("KLD Cummean len/min/max:")
+print res[3].size, res[3].min(), res[3].max()
+
+print("Edge Cummean len/min/max:")
+print res[5].size, res[5].min(), res[5].max()
+
 if 'WORKHASH' in os.environ:
-    r.lpush('jobs:done:'+os.environ['WORKHASH'], mean)
+    r.lpush('jobs:done:'+os.environ['WORKHASH'], res_wire)
