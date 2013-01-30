@@ -5,3 +5,8 @@ build
 cde.options
 cde-package
 *.so
+.exps
+config.py
+env
+mon.py
+samcnet/wishart.py
