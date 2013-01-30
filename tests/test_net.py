@@ -1,22 +1,17 @@
 import sys, os, random
 ############### SAMC Setup ############### 
-print "Starting job"
-
-sys.path.append('build') # Yuck!
-sys.path.append('.')
-sys.path.append('lib')
 
 import numpy as np
 import scipy as sp
 import networkx as nx
 import simplejson as js
-import samcnet.utils as utils
 
 try:
-    from samc import SAMCRun
-    from bayesnet import BayesNet
-    from bayesnetcpd import BayesNetCPD
-    from generator import *
+    from samcnet.samc import SAMCRun
+    from samcnet.bayesnet import BayesNet
+    from samcnet.bayesnetcpd import BayesNetCPD
+    from samcnet.generator import *
+    from samcnet import utils
 except ImportError as e:
     sys.exit("Make sure LD_LIBRARY_PATH is set correctly and that the build"+\
             " directory is populated by waf.\n\n %s" % str(e))
