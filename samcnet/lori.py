@@ -18,59 +18,6 @@ import sys
 sys.path.append('/home/bana/GSP/research/samc/code')
 sys.path.append('/home/bana/GSP/research/samc/code/build')
 
-class MHRun():
-    def __init__(self, obj, burn, thin=1):
-        self.obj = obj
-        self.burn = burn
-        self.db = None
-
-        self.mapvalue = None
-        self.mapenergy = None
-
-        self.thin = thin
-
-        self.iteration = 0
-
-        self.propose = 0
-        self.accept = 0
-
-    def sample(self, num):
-        num = int(num)
-        self.db = self.obj.init_db(self.db, (self.iteration + num - self.burn)//self.thin, 'mh')
-        minenergy = np.infty
-
-        oldenergy = self.obj.energy()
-        for i in range(int(num)):
-            self.iteration += 1
-
-            self.obj.propose()
-            self.propose+=1
-
-            newenergy = self.obj.energy()
-
-            r = oldenergy - newenergy # ignoring non-symmetric proposals for now
-            if r > 0.0 or np.random.rand() < exp(r):
-                # Accept
-                oldenergy = newenergy
-                self.accept += 1
-            else:
-                self.obj.reject()
-
-            if self.iteration>self.burn and i%self.thin == 0:
-                self.obj.save_to_db(self.db, 0, oldenergy, (self.iteration-self.burn-1)//self.thin)
-
-            if oldenergy < minenergy:
-                minenergy = oldenergy
-                self.mapvalue = self.obj.copy()
-                self.mapenergy = oldenergy
-
-            if self.iteration%1e3 == 0:
-                print "Iteration: %9d, best energy: %7f, current energy: %7f" \
-                        % (self.iteration, minenergy, oldenergy)
-
-        print "Sampling done, acceptance: %d/%d = %f" \
-                % (self.accept, self.propose, float(self.accept)/float(self.propose))
-            
 # Borrowed from https://github.com/mattjj/pymattutil/blob/master/stats.py
 def sample_invwishart(lmbda,dof):
     # TODO make a version that returns the cholesky
@@ -295,27 +242,12 @@ class Classification():
         fx1 = np.exp(logp_normal(grid, record['mu1'], record['sigma1'])).reshape(n,n)
         return (fx0, fx1)
 
-    def init_db(self, db, dbsize, mhtype):
-        self.mhtype = mhtype
-        dbsize = int(dbsize)
-        self.dtype = [('theta',np.double),
-                ('energy',np.double),
-                ('mu0',np.object),
-                ('mu1',np.object),
-                ('sigma0',np.object),
-                ('sigma1',np.object),
-                ('c', np.double)]
-        if db == None:
-            return np.zeros(dbsize, dtype=self.dtype)
-        elif db.shape[0] != dbsize:
-            return np.resize(db, dbsize)
-        else:
-            raise Exception("DB Not inited")
-
-    def save_to_db(self, db, theta, energy, iteration):
-        record = [theta, energy]
-        record.extend(self.copy())
-        db[iteration] = tuple(record)
+    def save_to_db(self):
+        return (self.mu0,
+                self.mu1,
+                self.sigma0.copy(),
+                self.sigma1.copy(),
+                self.c)
 
     def get_grid(self):
         samples = np.vstack((self.draw_from_true(0), self.draw_from_true(1)))
@@ -340,24 +272,24 @@ class Classification():
         afx1 = self.fx1.logpdf(grid).reshape(grid_n, -1)
         return afx0, afx1, ag
 
-    def estimate_sample_means(self, n, grid, db):
-        fxlist = [self.calc_densities(grid,n,x) for x in db]
-        fx0list = np.asarray([x[0] for x in fxlist])
-        fx1list = np.asarray([x[1] for x in fxlist])
-        if self.mhtype=='mh': 
-            fx0avg = np.dstack(fx0list).mean(axis=2)
-            fx1avg = np.dstack(fx1list).mean(axis=2)
-            cmean = db['c'].mean()
-        elif self.mhtype=='samc': 
-            part = np.exp(db['theta'] - db['theta'].max())
-            numerator0 = (part * fx0list).sum(axis=2)
-            numerator1 = (part * fx1list).sum(axis=2)
-            numeratorc = (part * db['c']).sum()
-            denom = part.sum()
-            fx0avg, fx1avg, cmean = numerator0/denom, numerator1/denom, numeratorc/denom
-        else:
-            raise Exception("NOT IMPLEMENTED: Mean calculation for %s method" % self.mhtype)
-        return cmean, fx0avg, fx1avg
+    #def estimate_sample_means(self, n, grid, db):
+        #fxlist = [self.calc_densities(grid,n,x) for x in db]
+        #fx0list = np.asarray([x[0] for x in fxlist])
+        #fx1list = np.asarray([x[1] for x in fxlist])
+        #if self.mhtype=='mh': 
+            #fx0avg = np.dstack(fx0list).mean(axis=2)
+            #fx1avg = np.dstack(fx1list).mean(axis=2)
+            #cmean = db['c'].mean()
+        #elif self.mhtype=='samc': 
+            #part = np.exp(db['theta'] - db['theta'].max())
+            #numerator0 = (part * fx0list).sum(axis=2)
+            #numerator1 = (part * fx1list).sum(axis=2)
+            #numeratorc = (part * db['c']).sum()
+            #denom = part.sum()
+            #fx0avg, fx1avg, cmean = numerator0/denom, numerator1/denom, numeratorc/denom
+        #else:
+            #raise Exception("NOT IMPLEMENTED: Mean calculation for %s method" % self.mhtype)
+        #return cmean, fx0avg, fx1avg
 
     def draw_from_true(self, cls, n=100):
         if cls == 0:
@@ -492,16 +424,3 @@ def plot_ellipse(splot, mean, cov, color):
     ell.set_clip_box(splot.bbox)
     ell.set_alpha(0.3)
     splot.add_artist(ell)
-
-if __name__ == '__main__':
-    import samc
-    from samcnet.utils import *
-    c = Classification()
-    s = samc.SAMCRun(c, burn=1000, stepscale=1000, refden=2)
-    #s = MHRun(c, burn=1000)
-    s.sample(5e3)
-
-    p.close('all')
-    plot_run(c,s.db)
-    plot_cross(c,s.db)
-    p.show()
