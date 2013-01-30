@@ -6,6 +6,18 @@ import pandas as pa
 #import pebl as pb
 import StringIO as si
 import tempfile
+import json as js
+import zlib
+import base64
+
+def encode_entry(a):
+    if type(a) == np.ndarray:
+        return base64.b64encode(a.tostring())
+    else:
+        return a
+
+def prepare_data(d):
+    return zlib.compress(js.dumps(d),9)
 
 def getHost():
     return os.uname()[1].split('.')[0]

@@ -9,9 +9,7 @@ sys.path.append('lib')
 import numpy as np
 import scipy as sp
 import networkx as nx
-import simplejson as js
-import base64
-import zlib
+import samcnet.utils as utils
 
 try:
     from samc import SAMCRun
@@ -67,16 +65,7 @@ for acc in [lambda x: x[0], lambda x: x[1], lambda x: x[2]]:
     for get in [s.func_mean, s.func_cummean]:
         res.append(get(acc))
 
-def encode_entry(a):
-    if type(a) == np.ndarray:
-        return base64.b64encode(a.tostring())
-    else:
-        return a
-
-def prepare_data(d):
-    return zlib.compress(js.dumps(d),9)
-
-res = prepare_data([encode_entry(x) for x in res])
+res = utils.prepare_data([utils.encode_entry(x) for x in res])
 
 if 'WORKHASH' in os.environ:
     r.lpush('jobs:done:'+os.environ['WORKHASH'], res)
