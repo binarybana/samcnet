@@ -110,7 +110,7 @@ cdef class SAMCRun:
         denom = part.cumsum()
         return numerator / denom
 
-    def func_mean(self, trunc=None, accessor=None):
+    def func_mean(self, accessor=None, trunc=None):
         """ 
         Using the function of interest in the object, estimate the mean of the function
         on the random weighted samples.

@@ -79,9 +79,6 @@ cdef class BayesNetCPD(BayesNet):
                 self.pnodes.push_back(Var(name, arity))
                 facvector.push_back(Factor(self.pnodes.back()))
         else: 
-            # Assume for the moment that ground is a JointDistribution
-            # TODO Fix this by changing generator to actually generate a proper
-            # BayesNetCPD
             totuple = []
             for name,arity in zip(nodes,states):
                 self.pnodes.push_back(Var(name, arity))
@@ -137,7 +134,8 @@ cdef class BayesNetCPD(BayesNet):
         if self.ground:
             kld = self.ground.kld(self)
             entropy = self.entropy()
-            func = (entropy,kld)
+            edge_score = self.global_edge_presence()
+            func = (entropy,kld,edge_score)
         else:
             func = 0.0
         assert db is not None, 'DB None when trying to save sample.'
@@ -472,6 +470,8 @@ cdef class BayesNetCPD(BayesNet):
         return scheme
     
     def adjust_factor(self, int node, object addlist, object dellist):
+        """ Adjust the factor according to the add list and delete list 
+        """
         cdef int s
         cdef Factor oldfac = self.fg.factor(node)
 

@@ -31,8 +31,8 @@ if 'WORKHASH' in os.environ:
         sys.exit("ERROR in worker: Need REDIS environment variable defined.")
 ############### /SAMC Setup ############### 
 
-N = 7
-iters = 6e5
+N = 4
+iters = 5e5
 numdata = 20
 priorweight = 5
 numtemplate = 5
@@ -40,7 +40,7 @@ burn = 100000
 stepscale=100000
 temperature = 1.0
 thin = 100
-refden = 0.0
+refden = 2.0
 
 random.seed(123456)
 np.random.seed(123456)
@@ -62,21 +62,21 @@ b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight)
 s = SAMCRun(b,burn,stepscale,refden,thin)
 s.sample(iters, temperature)
 
-entropy_mean = s.func_mean(accessor = lambda x: x[0])
-entropy_cummean = s.func_cummean(accessor = lambda x: x[0])
+res = []
+for acc in [lambda x: x[0], lambda x: x[1], lambda x: x[2]]:
+    for get in [s.func_mean, s.func_cummean]:
+        res.append(get(acc))
 
-kld_mean = s.func_mean(accessor = lambda x: x[1])
-kld_cummean = s.func_cummean(accessor = lambda x: x[1])
+def encode_entry(a):
+    if type(a) == np.ndarray:
+        return base64.b64encode(a.tostring())
+    else:
+        return a
 
-print("KLD Mean is: ", kld_mean)
-print("Entropy Mean is: ", entropy_mean)
-
-def encode_array(a):
-    return base64.b64encode(a.tostring())
 def prepare_data(d):
     return zlib.compress(js.dumps(d),9)
 
-res = prepare_data((entropy_mean, kld_mean, encode_array(entropy_cummean), encode_array(kld_cummean)))
+res = prepare_data([encode_entry(x) for x in res])
 
 if 'WORKHASH' in os.environ:
     r.lpush('jobs:done:'+os.environ['WORKHASH'], res)
