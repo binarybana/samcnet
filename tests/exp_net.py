@@ -65,7 +65,7 @@ for acc in [lambda x: x[0], lambda x: x[1], lambda x: x[2]]:
     for get in [s.func_mean, s.func_cummean]:
         res.append(get(acc))
 
-res = utils.prepare_data([utils.encode_entry(x) for x in res])
+res = utils.prepare_data([utils.encode_element(x) for x in res])
 
 if 'WORKHASH' in os.environ:
     r.lpush('jobs:done:'+os.environ['WORKHASH'], res)

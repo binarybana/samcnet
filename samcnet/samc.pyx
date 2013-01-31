@@ -109,9 +109,9 @@ cdef class SAMCRun:
 
         thetas = self.db['thetas']
         if accessor == None:
-            funcs = self.db['funcs']
+            funcs = self.db['funcs'].astype(np.float)
         else:
-            funcs = np.vectorize(accessor)(self.db['funcs'])
+            funcs = np.vectorize(accessor)(self.db['funcs']).astype(np.float)
 
         part = np.exp(thetas - thetas.max())
         numerator = (part * funcs).cumsum()
@@ -134,9 +134,9 @@ cdef class SAMCRun:
                 "proceeded beyond the burn-in period'
         thetas = self.db['thetas']
         if accessor == None:
-            funcs = self.db['funcs']
+            funcs = self.db['funcs'].astype(np.float)
         else:
-            funcs = np.vectorize(accessor)(self.db['funcs'])
+            funcs = np.vectorize(accessor)(self.db['funcs']).astype(np.float)
 
         if trunc:
             num = len(self.db)/trunc

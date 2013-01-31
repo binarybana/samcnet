@@ -6,18 +6,30 @@ import pandas as pa
 #import pebl as pb
 import StringIO as si
 import tempfile
-import json as js
+import simplejson as js
 import zlib
 import base64
 
-def encode_entry(a):
+def encode_element(a):
     if type(a) == np.ndarray:
+        assert a.dtype == np.float64, \
+                "Must encode numpy arrays of floats, not %s" \
+                % str(a.dtype)
         return base64.b64encode(a.tostring())
     else:
         return a
 
 def prepare_data(d):
     return zlib.compress(js.dumps(d),9)
+
+def decode_element(s):
+    try:
+        return float(s)
+    except:
+        return np.fromstring(base64.b64decode(s))
+
+def load_data(s):
+    return js.loads(zlib.decompress(s))
 
 def getHost():
     return os.uname()[1].split('.')[0]

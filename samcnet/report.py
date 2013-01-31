@@ -3,18 +3,12 @@ import pylab as p
 import numpy as np
 import scipy as sp
 import networkx as nx
-import simplejson as js
+import json as js
 import base64
 import zlib
 import redis
 
-def decode_element(s):
-    try:
-        return float(s)
-    except:
-        return np.fromstring(base64.b64decode(s))
-def load_data(s):
-    return js.loads(zlib.decompress(s))
+from samcnet.utils import load_data, decode_element
 
 r = redis.StrictRedis('localhost')
 
@@ -32,6 +26,7 @@ if not sel.isdigit() or int(sel) not in range(i+1):
 sel = int(sel)
 
 datastrings = r.lrange(done_hashes[sel], 0, -1)
+print "Got %d datasets from hash %s" % (len(datastrings), done_hashes[sel][:5])
 
 for d in datastrings:
     res = [decode_element(x) for x in load_data(d)]
@@ -40,10 +35,12 @@ for d in datastrings:
     indices = np.linspace(0,1,n)
     for i,val in enumerate(res):
         if type(val) == np.ndarray:
-            p.plot(val, alpha=0.4, color=p.cm.jet(indices[i]))
-            print indices[i], p.cm.jet(indices[i])
+            p.plot(val, alpha=0.4, color='blue')#color=p.cm.jet(indices[i]))
+            #print indices[i], p.cm.jet(indices[i])
+        else:
+            print val
 
-p.ylim(0, 7)
+#p.ylim(0, 7)
 p.xlabel('Iterations after burnin')
 p.title(r.hget('jobs:descs', done_hashes[sel][10:]))
 p.grid(True)
