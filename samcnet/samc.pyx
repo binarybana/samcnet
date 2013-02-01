@@ -20,8 +20,6 @@ cdef class SAMCRun:
         self.clear()
 
         self.scale = 1
-        self.set_energy_limits()
-
         self.rho=1.0
         self.tau=1.0;
 
@@ -31,6 +29,8 @@ cdef class SAMCRun:
         self.thin = thin
 
         self.db = None
+
+        self.set_energy_limits()
 
     def set_energy_limits(self):
         cdef int i
