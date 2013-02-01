@@ -1,6 +1,8 @@
 import os
 import sys
 import redis
+import random
+import numpy as np
 try:
     from samcnet import samc,lori,utils
 except ImportError as e:

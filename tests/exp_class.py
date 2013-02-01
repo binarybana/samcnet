@@ -1,6 +1,8 @@
 import os
 import sys
 import redis
+import random
+import numpy as np
 try:
     from samcnet import samc,lori,utils
 except ImportError as e:
@@ -23,8 +25,8 @@ c = lori.Classification()
 random.seed()
 np.random.seed()
 
-s = samc.SAMCRun(c, burn=100, stepscale=1000, refden=0, thin=100)
-s.sample(5e4)
+s = samc.SAMCRun(c, burn=10000, stepscale=100, refden=0, thin=100)
+s.sample(5e5)
 
 res = []
 def make_acc(n):
