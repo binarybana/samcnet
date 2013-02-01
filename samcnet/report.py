@@ -41,8 +41,10 @@ for d in datastrings:
             print val
 
 #p.ylim(0, 7)
-p.xlabel('Iterations after burnin')
-p.title(r.hget('jobs:descs', done_hashes[sel][10:]))
+p.xlabel('Samples obtained after burnin (after thinning)')
+p.title(r.hget('jobs:descs', done_hashes[sel][10:]) + "\n" + \
+        done_hashes[sel][10:18])
 p.grid(True)
+p.legend(("theta",))
 
 p.show()
