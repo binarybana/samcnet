@@ -16,6 +16,7 @@ import scipy.stats as st
 
 from collections import Counter, defaultdict
 from math import lgamma, log
+import tables as t
 
 cdef extern from "utils.h":
     string crepr(FactorGraph &)
@@ -45,13 +46,14 @@ cdef class BayesNetCPD(BayesNet):
         self.memo_entropy = 0.0
         self.dirty = True
     
-    def __init__(self, states, data, template=None, ground=None, priorweight=1.0, gold=False):
+    def __init__(self, states, data, template=None, ground=None, priorweight=1.0, gold=False,
+            verbose=False):
         cdef int i, j, k, l
         cdef Factor tempfactor
         cdef VarSet tempvarset, parset
         cdef map[Var, size_t] mapstate
         nodes = np.arange(states.shape[0])
-        BayesNet.__init__(self, states, data, template, ground, priorweight)
+        BayesNet.__init__(self, states, data, template, ground, priorweight,verbose)
 
         self.logqfactor = 0.0
         if data.size:
@@ -88,7 +90,8 @@ cdef class BayesNetCPD(BayesNet):
                             tempfactor.set(calcLinearState(tempvarset, mapstate), 
                                     1 - np.sum(ground.dists[i].fastp(tuple(totuple))))
                         else:
-                            tempfactor.set(calcLinearState(tempvarset, mapstate), ground.dists[i].fastp(tuple(totuple))[k])
+                            tempfactor.set(calcLinearState(tempvarset, mapstate), 
+                                    ground.dists[i].fastp(tuple(totuple))[k])
                 facvector.push_back(tempfactor)
 
         self.fg = FactorGraph(facvector)
@@ -97,18 +100,34 @@ cdef class BayesNetCPD(BayesNet):
         """ Create a copy of myself for suitable use later """
         return (self.mat.copy(), self.x.copy(), 0 )# self.fg.clone()) # need to wrap this
 
-    def save_to_db(self):
-        """ Return a python object that contains all quantities of interest for
-        later analysis """ 
+    def init_db(self, db, size):
+        """ Takes a Pytables Group object (group) and the total number of samples expected and
+        expands or creates the necessary groups.
+        """
+        objroot = db.root.object
+        db.createEArray(objroot.objfxn, 'entropy', t.Float64Atom(), (0,), expectedrows=size)
         if self.ground:
-            kld = self.ground.kld(self)
-            entropy = self.entropy()
-            edge_score = self.global_edge_presence()
-            func = (entropy,kld,edge_score)
-        else:
-            entropy = self.entropy()
-            func = (entropy,)
-        return func
+            db.createEArray(objroot.objfxn, 'kld', t.Float64Atom(), (0,), expectedrows=size)
+            db.createEArray(objroot.objfxn, 'edge_distance', t.Float64Atom(), (0,), expectedrows=size)
+        if self.verbose:
+            N = self.x.size
+            db.createEArray(objroot.samples, 'mat', t.UInt8Atom(), shape=(0,N,N),
+                    expectedrows=size)
+            db.createEArray(objroot.samples, 'x', t.UInt32Atom(), shape=(0,N),
+                    expectedrows=size)
+
+    def save_iter_db(self, db):
+        """ Saves objective function (and possible samples depending on verbosity) to
+        Pytables db
+        """ 
+        root = db.root.object
+        root.objfxn.entropy.append((self.entropy(),))
+        if self.verbose:
+            root.samples.mat.append((self.mat,))
+            root.samples.x.append((self.x,))
+        if self.ground:
+            root.objfxn.kld.append((self.ground.kld(self),))
+            root.objfxn.edge_distance.append((self.global_edge_presence(),))
 
     #@cython.boundscheck(False)
     def energy(self):

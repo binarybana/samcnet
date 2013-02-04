@@ -17,7 +17,8 @@ cdef class BayesNet:
     def __cinit__(self, *args, **kwargs):
         pass
     
-    def __init__(self, states, data, template=None, ground=None, priorweight=1.0):
+    def __init__(self, states, data, template=None, ground=None, priorweight=1.0,
+            verbose=False):
         """
         nodes: a list of strings for the nodes
         states: a list of number of states for each node
@@ -27,6 +28,8 @@ cdef class BayesNet:
         ground: A (networkx graph, joint distribution) tuple of the ground truth
         Initializes the BayesNet as a set of independent nodes
         """
+        self.verbose = verbose
+
         self.states = np.asarray(states,dtype=np.int32)
         self.nodes = np.arange(self.states.shape[0], dtype=np.int)
         self.data = np.asarray(data,dtype=np.int32)

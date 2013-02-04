@@ -52,29 +52,29 @@ np.random.seed()
 
 ground = BayesNetCPD(states, data, template, ground=joint, priorweight=priorweight, gold=True)
 
-b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight)
-s = SAMCRun(b,burn,stepscale,refden,thin)
+b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight,verbose=True)
+s = SAMCRun(b,burn,stepscale,refden,thin,verbose=True)
 s.sample(iters, temperature)
 
-res = []
-for acc in [lambda x: x[0], lambda x: x[1], lambda x: x[2]]:
-    for get in [s.func_mean, s.func_cummean]:
-        res.append(get(acc))
+#res = []
+#for acc in [lambda x: x[0], lambda x: x[1], lambda x: x[2]]:
+    #for get in [s.func_mean, s.func_cummean]:
+        #res.append(get(acc))
 
-res_wire = utils.prepare_data([utils.encode_entry(x) for x in res])
+#res_wire = utils.prepare_data([utils.encode_entry(x) for x in res])
 
-print("KLD Mean is: ", res[0])
-print("Entropy Mean is: ", res[2])
-print("Edge distance Mean is: ", res[4])
+#print("KLD Mean is: ", res[0])
+#print("Entropy Mean is: ", res[2])
+#print("Edge distance Mean is: ", res[4])
 
-print("Entropy Cummean len/min/max:")
-print res[1].size, res[1].min(), res[1].max()
+#print("Entropy Cummean len/min/max:")
+#print res[1].size, res[1].min(), res[1].max()
 
-print("KLD Cummean len/min/max:")
-print res[3].size, res[3].min(), res[3].max()
+#print("KLD Cummean len/min/max:")
+#print res[3].size, res[3].min(), res[3].max()
 
-print("Edge Cummean len/min/max:")
-print res[5].size, res[5].min(), res[5].max()
+#print("Edge Cummean len/min/max:")
+#print res[5].size, res[5].min(), res[5].max()
 
 if 'WORKHASH' in os.environ:
     r.lpush('jobs:done:'+os.environ['WORKHASH'], res_wire)

@@ -4,6 +4,8 @@ from libc.math cimport exp, ceil, floor
 
 import sys
 import os
+import tempfile
+import tables as t
 from itertools import izip
 
 import numpy as np
@@ -11,18 +13,16 @@ cimport numpy as np
 
 cdef class SAMCRun:
     cdef public:
-        object obj, db, refden, hist, mapvalue
+        object obj, db, refden, hist, mapvalue, verbose
         int lowEnergy, highEnergy, grid, accept_loc, total_loc, iteration, burn, stepscale, thin
-        double rho, tau, mapenergy, delta, scale, refden_power
-    def __init__(self, obj, burn=100000, stepscale = 10000, refden=0.0, thin=1):
+        double mapenergy, delta, scale, refden_power
+    def __init__(self, obj, burn=100000, stepscale = 10000, refden=0.0, thin=1, verbose=False):
 
+        self.verbose = verbose
         self.obj = obj # Going to be a BayesNet for now, but we'll keep it general
         self.clear()
 
         self.scale = 1
-        self.rho=1.0
-        self.tau=1.0;
-
         self.burn = burn
         self.stepscale = stepscale
         self.refden_power = refden
@@ -89,11 +89,60 @@ cdef class SAMCRun:
         self.accept_loc = 0
         self.total_loc = 0
 
-    def save_to_db(self, double theta, double energy, int iteration):
-        assert self.db is not None, 'DB None when trying to save sample.'
-        self.db[iteration][0] = theta
-        self.db[iteration][1] = energy
-        self.db[iteration][2] = self.obj.save_to_db()
+    def init_db(self, size):
+        if self.db == None:
+            filt = t.Filters(complib='bzip2', complevel=0, fletcher32=True)
+            if not os.path.exists('.tmp'):
+                print("Creating temp directory: .tmp")
+                os.mkdir('.tmp')
+            name = tempfile.mktemp(prefix='samc', dir='.tmp')
+            self.db = t.openFile(name, mode = 'w', title='SAMC Run Data', filters=filt)
+
+            self.db.createGroup('/', 'samc', 'SAMC info')
+            if self.verbose:
+                self.db.createEArray('/samc', 'theta_trace', t.Float64Atom(), (0,), expectedrows=size)
+                self.db.createEArray('/samc', 'energy_trace', t.Float64Atom(), (0,), expectedrows=size)
+            self.db.createCArray('/samc', 'theta', t.Float64Atom(), (self.grid,))
+            self.db.createCArray('/samc', 'freqs', t.Int64Atom(), (self.grid,)) 
+
+            objdb = self.db.createGroup('/', 'object', 'Object info')
+            samples = self.db.createGroup(objdb, 'samples', 'Samples')
+            objfxn = self.db.createGroup(objdb, 'objfxn', 'Objective function outputs')
+            self.db.root.samc._v_attrs.temperature = []
+
+            self.obj.init_db(self.db, size)
+
+    def close_db(self):
+        self.db.close()
+
+    def save_iter_db(self, double theta, double energy, int iteration):
+        if self.verbose:
+            self.db.root.samc.theta_trace.append((theta,))
+            self.db.root.samc.energy_trace.append((energy,))
+
+        self.obj.save_iter_db(self.db)
+
+    def save_state_db(self, last_temperature):
+        samcroot = self.db.root.samc
+        samcroot.theta[:] = self.hist[1,:]
+        samcroot.freqs[:] = self.hist[2,:].astype(np.int64)
+
+        samcroot._v_attrs.prop_accept = self.accept_loc
+        samcroot._v_attrs.prop_total = self.total_loc
+
+        samcroot._v_attrs.temperature.append(last_temperature)
+        samcroot._v_attrs.curr_delta = self.delta
+
+        samcroot._v_attrs.stepscale = self.stepscale
+        samcroot._v_attrs.refden = self.refden
+        samcroot._v_attrs.burnin = self.burn
+        samcroot._v_attrs.thin = self.thin
+        samcroot._v_attrs.curr_iteration = self.iteration
+
+        samcroot._v_attrs.scale = self.scale
+        samcroot._v_attrs.grid = self.grid
+        samcroot._v_attrs.lowEnergy = self.lowEnergy
+        samcroot._v_attrs.highEnergy = self.highEnergy
 
     def func_cummean(self, accessor=None):
         """ 
@@ -162,18 +211,6 @@ cdef class SAMCRun:
             i = <int> floor((energy-self.lowEnergy)/self.scale)
             return i if i<self.grid else self.grid-1
 
-    def init_db(self, size):
-        dtype = [('thetas',np.double),
-                 ('energies',np.double),
-                 ('funcs',np.object)]
-        if self.db == None:
-            self.db = np.zeros(size, dtype=dtype)
-        elif self.db.shape[0] != size:
-            self.db = np.resize(self.db, size)
-        else:
-            raise Exception("DB not initialized!")
-
-
     #@cython.boundscheck(False) # turn off bounds-checking for entire function
     def sample(self, int iters, double temperature = 1.0):
         cdef int current_iter, accept, oldregion, newregion, i, nonempty, dbsize
@@ -233,7 +270,7 @@ cdef class SAMCRun:
             locfreq[oldregion] -= 1
 
             if current_iter >= self.burn and current_iter % self.thin == 0:
-                self.save_to_db(hist[oldregion], 
+                self.save_iter_db(hist[oldregion], 
                                 oldenergy, 
                                 (current_iter-self.burn)//self.thin)
 
@@ -242,6 +279,7 @@ cdef class SAMCRun:
                         (self.iteration, self.delta, self.mapenergy, newenergy))
 
         self.hist[1] = hist
+        self.save_state_db(temperature)
 
         ###### Calculate summary statistics #######
         print("Accept_loc: %d" % self.accept_loc)

@@ -5,6 +5,7 @@ cdef class BayesNet:
         object nodes,states,data,graph,x,mat,fvalue,changelist,table
         object oldmat, oldx, oldfvalue
         object gtemplate, ntemplate, ground
+        object verbose
         int limparent, data_num, node_num, changelength
         double prior_alpha, prior_gamma
     cdef:
