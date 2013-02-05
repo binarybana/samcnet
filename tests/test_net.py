@@ -5,6 +5,8 @@ import numpy as np
 import scipy as sp
 import networkx as nx
 import simplejson as js
+import tables as t
+import zlib
 
 try:
     from samcnet.samc import SAMCRun
@@ -55,6 +57,13 @@ ground = BayesNetCPD(states, data, template, ground=joint, priorweight=priorweig
 b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight,verbose=True)
 s = SAMCRun(b,burn,stepscale,refden,thin,verbose=True)
 s.sample(iters, temperature)
+
+fname = '/tmp/test.h5'
+fid = open(fname, 'w')
+fid.write(zlib.decompress(s.read_db()))
+fid.close()
+
+db = t.openFile(fname, 'r')
 
 #res = []
 #for acc in [lambda x: x[0], lambda x: x[1], lambda x: x[2]]:

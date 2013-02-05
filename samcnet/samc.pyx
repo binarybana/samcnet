@@ -5,6 +5,7 @@ from libc.math cimport exp, ceil, floor
 import sys
 import os
 import tempfile
+import zlib
 import tables as t
 from itertools import izip
 
@@ -112,6 +113,16 @@ cdef class SAMCRun:
 
             self.obj.init_db(self.db, size)
 
+    def read_db(self):
+        assert self.db.isopen == 1, "DB not open!"
+        fname = self.db.filename
+        self.db.close()
+        fid = open(fname, 'r')
+        data = zlib.compress(fid.read())
+        fid.close()
+        self.db = t.openFile(fname, 'r+')
+        return data
+
     def close_db(self):
         self.db.close()
 
@@ -144,62 +155,58 @@ cdef class SAMCRun:
         samcroot._v_attrs.lowEnergy = self.lowEnergy
         samcroot._v_attrs.highEnergy = self.highEnergy
 
-    def func_cummean(self, accessor=None):
+    def func_cummean(self):
         """ 
-        Using the function of interest in the object, compute the cumulative mean of the function
-        on the random weighted samples.
-
-        If accessor is given, then it is a function which pulls out the quantity of interest from
-        db['funcs'].
+        Using the currently saved samples from the object in the pytables db, 
+        compute the cumulative mean of the function on the random weighted samples.
+        And save the results to the /computed/cummeans region of the db.
         """
         assert self.db != None, 'db not initialized'
-        assert len(self.db) != 0, 'Length of db is zero! Perhaps you have not "\
-                "proceeded beyond the burn-in period'
+        #assert len(self.db) != 0, 'Length of db is zero! Perhaps you have not "\
+                #"proceeded beyond the burn-in period'
 
-        thetas = self.db['thetas']
-        if accessor == None:
-            funcs = self.db['funcs'].astype(np.float)
-        else:
-            funcs = np.vectorize(accessor)(self.db['funcs']).astype(np.float)
+        #thetas = self.db['thetas']
+        #if accessor == None:
+            #funcs = self.db['funcs'].astype(np.float)
+        #else:
+            #funcs = np.vectorize(accessor)(self.db['funcs']).astype(np.float)
 
-        part = np.exp(thetas - thetas.max())
-        numerator = (part * funcs).cumsum()
-        denom = part.cumsum()
-        return numerator / denom
+        #part = np.exp(thetas - thetas.max())
+        #numerator = (part * funcs).cumsum()
+        #denom = part.cumsum()
+        #return numerator / denom
 
-    def func_mean(self, accessor=None, trunc=None):
+    def func_mean(self, trunc=None):
         """ 
-        Using the function of interest in the object, estimate the mean of the function
-        on the random weighted samples.
+        Using the currently saved samples from the object in the pytables db, 
+        compute the cumulative mean of the function on the random weighted samples.
+        And save the results to the /computed/means region of the db.
 
         If trunc is given, then it gives the proportion of samples (in descending order by theta) 
         to discard.
-
-        If accessor is given, then it is a function which pulls out the quantity of interest from
-        db['funcs'].
         """
         assert self.db != None, 'db not initialized'
-        assert len(self.db) != 0, 'Length of db is zero! Perhaps you have not "\
-                "proceeded beyond the burn-in period'
-        thetas = self.db['thetas']
-        if accessor == None:
-            funcs = self.db['funcs'].astype(np.float)
-        else:
-            funcs = np.vectorize(accessor)(self.db['funcs']).astype(np.float)
+        #assert len(self.db) != 0, 'Length of db is zero! Perhaps you have not "\
+                #"proceeded beyond the burn-in period'
+        #thetas = self.db['thetas']
+        #if accessor == None:
+            #funcs = self.db['funcs'].astype(np.float)
+        #else:
+            #funcs = np.vectorize(accessor)(self.db['funcs']).astype(np.float)
 
-        if trunc:
-            num = len(self.db)/trunc
-            grab = thetas.argsort()[::-1][num:]
-            thetas = thetas[grab]
+        #if trunc:
+            #num = len(self.db)/trunc
+            #grab = thetas.argsort()[::-1][num:]
+            #thetas = thetas[grab]
 
-        part = np.exp(thetas - thetas.max())
+        #part = np.exp(thetas - thetas.max())
 
-        if trunc:
-            numerator = (part * funcs[grab]).sum()
-        else:
-            numerator = (part * funcs).sum()
-        denom = part.sum()
-        return numerator / denom
+        #if trunc:
+            #numerator = (part * funcs[grab]).sum()
+        #else:
+            #numerator = (part * funcs).sum()
+        #denom = part.sum()
+        #return numerator / denom
 
     cdef find_region(self, energy):
         cdef int i
