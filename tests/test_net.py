@@ -58,6 +58,8 @@ b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight,v
 s = SAMCRun(b,burn,stepscale,refden,thin,verbose=True)
 s.sample(iters, temperature)
 
+s.compute_means()
+
 fname = '/tmp/test.h5'
 fid = open(fname, 'w')
 fid.write(zlib.decompress(s.read_db()))

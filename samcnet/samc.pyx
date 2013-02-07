@@ -100,11 +100,10 @@ cdef class SAMCRun:
             self.db = t.openFile(name, mode = 'w', title='SAMC Run Data', filters=filt)
 
             self.db.createGroup('/', 'samc', 'SAMC info')
-            if self.verbose:
-                self.db.createEArray('/samc', 'theta_trace', t.Float64Atom(), (0,), expectedrows=size)
-                self.db.createEArray('/samc', 'energy_trace', t.Float64Atom(), (0,), expectedrows=size)
-            self.db.createCArray('/samc', 'theta', t.Float64Atom(), (self.grid,))
-            self.db.createCArray('/samc', 'freqs', t.Int64Atom(), (self.grid,)) 
+            self.db.createEArray('/samc', 'theta_trace', t.Float64Atom(), (0,), expectedrows=size)
+            self.db.createEArray('/samc', 'energy_trace', t.Float64Atom(), (0,), expectedrows=size)
+            self.db.createCArray('/samc', 'theta_hist', t.Float64Atom(), (self.grid,))
+            self.db.createCArray('/samc', 'freq_hist', t.Int64Atom(), (self.grid,)) 
 
             objdb = self.db.createGroup('/', 'object', 'Object info')
             samples = self.db.createGroup(objdb, 'samples', 'Samples')
@@ -127,16 +126,15 @@ cdef class SAMCRun:
         self.db.close()
 
     def save_iter_db(self, double theta, double energy, int iteration):
-        if self.verbose:
-            self.db.root.samc.theta_trace.append((theta,))
-            self.db.root.samc.energy_trace.append((energy,))
+        self.db.root.samc.theta_trace.append((theta,))
+        self.db.root.samc.energy_trace.append((energy,))
 
         self.obj.save_iter_db(self.db)
 
     def save_state_db(self, last_temperature):
         samcroot = self.db.root.samc
-        samcroot.theta[:] = self.hist[1,:]
-        samcroot.freqs[:] = self.hist[2,:].astype(np.int64)
+        samcroot.theta_hist[:] = self.hist[1,:]
+        samcroot.freq_hist[:] = self.hist[2,:].astype(np.int64)
 
         samcroot._v_attrs.prop_accept = self.accept_loc
         samcroot._v_attrs.prop_total = self.total_loc
@@ -155,7 +153,7 @@ cdef class SAMCRun:
         samcroot._v_attrs.lowEnergy = self.lowEnergy
         samcroot._v_attrs.highEnergy = self.highEnergy
 
-    def func_cummean(self):
+    def compute_means(self, cummeans=True):
         """ 
         Using the currently saved samples from the object in the pytables db, 
         compute the cumulative mean of the function on the random weighted samples.
@@ -165,48 +163,25 @@ cdef class SAMCRun:
         #assert len(self.db) != 0, 'Length of db is zero! Perhaps you have not "\
                 #"proceeded beyond the burn-in period'
 
-        #thetas = self.db['thetas']
-        #if accessor == None:
-            #funcs = self.db['funcs'].astype(np.float)
-        #else:
-            #funcs = np.vectorize(accessor)(self.db['funcs']).astype(np.float)
+        thetas = self.db.root.samc.theta_trace.read()
+        part = np.exp(thetas - thetas.max())
+        denom = part.cumsum()
 
-        #part = np.exp(thetas - thetas.max())
-        #numerator = (part * funcs).cumsum()
-        #denom = part.cumsum()
-        #return numerator / denom
-
-    def func_mean(self, trunc=None):
-        """ 
-        Using the currently saved samples from the object in the pytables db, 
-        compute the cumulative mean of the function on the random weighted samples.
-        And save the results to the /computed/means region of the db.
-
-        If trunc is given, then it gives the proportion of samples (in descending order by theta) 
-        to discard.
-        """
-        assert self.db != None, 'db not initialized'
-        #assert len(self.db) != 0, 'Length of db is zero! Perhaps you have not "\
-                #"proceeded beyond the burn-in period'
-        #thetas = self.db['thetas']
-        #if accessor == None:
-            #funcs = self.db['funcs'].astype(np.float)
-        #else:
-            #funcs = np.vectorize(accessor)(self.db['funcs']).astype(np.float)
-
-        #if trunc:
-            #num = len(self.db)/trunc
-            #grab = thetas.argsort()[::-1][num:]
-            #thetas = thetas[grab]
-
-        #part = np.exp(thetas - thetas.max())
-
-        #if trunc:
-            #numerator = (part * funcs[grab]).sum()
-        #else:
-            #numerator = (part * funcs).sum()
-        #denom = part.sum()
-        #return numerator / denom
+        if not 'computed' in self.db.root:
+            self.db.createGroup('/', 'computed', 'Computed quantities')
+        if not 'cummeans' in self.db.root.computed:
+            cumgroup = self.db.createGroup('/computed', 'cummeans', 'Cumulative means')
+        if not 'means' in self.db.root.computed:
+            meangroup = self.db.createGroup('/computed', 'means', 'Means')
+        for item in self.db.walkNodes('/object'):
+            if isinstance(item, t.array.Array) and len(item.shape)==1:
+                funcs = item.read().astype(np.float)
+                numerator = (part * funcs).cumsum()
+                if item.name in cumgroup:
+                    raise Exception("Not implemented yet: multiple calls to func_cummean")
+                arr = self.db.createCArray(cumgroup, item.name, t.Float64Atom(), (thetas.size,))
+                arr[:] = numerator / denom
+                meangroup._v_attrs[item.name] = arr[-1]
 
     cdef find_region(self, energy):
         cdef int i
