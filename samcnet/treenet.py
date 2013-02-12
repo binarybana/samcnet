@@ -42,8 +42,8 @@ class TreeNet():
                 g.node[n1]['eta'] = st.beta.rvs(0.4,0.4)
                 g.node[n1]['marginal'] = np.nan
             else: 
-                g.node[n1]['delta'] = nan
-                g.node[n1]['eta'] = nan
+                g.node[n1]['delta'] = np.nan
+                g.node[n1]['eta'] = np.nan
                 g.node[n1]['marginal'] = np.random.rand()
 
         if scheme == 1: # Add or change edge 'backwards'
@@ -74,6 +74,7 @@ class TreeNet():
             g.node[n1]['eta'] = np.nan
             g.node[n1]['marginal'] = np.random.rand()
 
+        #print len(g.edges())
         trav = nx.dfs_preorder_nodes(g,n1)
         trav.next()
         for node in trav:
@@ -93,7 +94,7 @@ class TreeNet():
         for node in nx.dfs_preorder_nodes(g):
             params = g.node[node]
             if np.isnan(params['marginal']):
-                predmarg = g.node[g.predecessor(node)]['marginal']
+                predmarg = g.node[g.predecessors(node)[0]]['marginal']
                 params['marginal'] = (1-params['delta'])*predmarg + \
                         params['eta']*(1-predmarg)
 
@@ -123,7 +124,7 @@ class TreeNet():
             return self.memo_entropy
         self.ve()
         h = 0.0
-        for i,p in self.g.node.iteritems():
+        for i,p in self.graph.node.iteritems():
             if np.isnan(p['eta']): # No parent
                 marg = p['marginal']
                 h -= marg*log(marg) + (1-marg)*log(1-marg)
@@ -138,21 +139,83 @@ class TreeNet():
         return h
 
     def kld(self, other):
-        entropy = self.entropy()
-        self.ve()
-        term = 0.0
-        for i,p in self.g.node.iteritems():
+        div = 0.0
+        div -= self.entropy() # Assuming this will self.ve() if needed
+        other.ve()
+        for i,p in other.graph.node.iteritems(): # note other here
             if np.isnan(p['eta']): # No parent
                 marg = p['marginal']
-                h -= marg*log(marg) + (1-marg)*log(1-marg)
+                othermarg = other.graph.node[i]['marginal']
+                div -= marg*log(othermarg) + (1-marg)*log(1-othermarg)
             else:
-                delta = p['delta']
-                eta = p['eta']
-                parmarg = self.graph.node[self.graph.predecessors(i)[0]]['marginal']
-                h -= parmarg*(delta*log(delta) + (1-delta)*log(1-delta))
-                h -= (1-parmarg)*(eta*log(eta) + (1-eta)*log(1-eta))
+                parent = self.graph.predecessors(i)[0]
+                parmarg = self.graph.node[parent]['marginal']
 
+                cond = self.cond_prob(i, parent)
+                div -= parmarg*(cond[1]*log(1-p['delta']) + (1-cond[1])*log(p['delta'])) \
+                    + (1-parmarg)*(cond[0]*log(p['eta']) + (1-cond[0])*log(1-p['eta'])) # parent = 0
+        return div
 
+    def cond_prob(self, node, cond):
+        """ Compute Pr(node=1 | cond=0) and Pr(node=1 | cond=1)
+        by finding a path from cond to node and summing out the other variables
+        """
+        self.ve()
+        path = list(nx.all_simple_paths(self.graph, node, cond))
+        pathalt = list(nx.all_simple_paths(self.graph, cond, node))
+        if len(path) == len(pathalt) == 0:
+            return self.graph.node[node]["marginal"]
+        elif len(path) > 0:
+            down = True # Cond is DOWNstream from node
+        else:
+            down = False
+            path = pathalt
+        par0sum = 0.0 # Two sums, for cond = {0,1}
+        par1sum = 0.0
+        for state in range(2**(len(path[0][1:-1]))): #enumerate states of inter nodes
+            if down: #start at node
+                par0term = self.graph.node[node]["marginal"]
+                par1term = self.graph.node[node]["marginal"]
+                lastval0 = 1
+                lastval1 = 1
+            else: #start at cond 
+                par0term = (1-self.graph.node[cond]["marginal"])
+                par1term = self.graph.node[cond]["marginal"]
+                lastval0 = 0 
+                lastval1 = 1
+
+            # Now we need to go down the chain of intermediate nodes 
+            for ind, inter in enumerate(path[0][1:-1]):
+                this = (state>>ind) & 1
+                par0term *= (1-this)*(1-lastval0)*(1-self.graph.node[inter]['eta']) \
+                        + (1-this)*(lastval0)*(self.graph.node[inter]['delta']) \
+                        + this*(1-lastval0)*self.graph.node[inter]['eta'] \
+                        + this*lastval0*(1-self.graph.node[inter]['delta'])
+                par1term *= (1-this)*(1-lastval1)*(1-self.graph.node[inter]['eta']) \
+                        + (1-this)*(lastval1)*(self.graph.node[inter]['delta']) \
+                        + this*(1-lastval1)*self.graph.node[inter]['eta'] \
+                        + this*lastval1*(1-self.graph.node[inter]['delta'])
+                lastval0 = this
+                lastval1 = this
+
+            # Now for last node
+            if down: #end at cond
+                par0term *= (1-lastval0)*(1-self.graph.node[cond]['eta']) \
+                        + (lastval0)*(self.graph.node[cond]['delta'])
+                par1term *= (1-lastval1)*self.graph.node[cond]['eta'] \
+                        + lastval1*(1-self.graph.node[cond]['delta'])
+            else: #end at node
+                par0term *= (1-lastval0)*self.graph.node[node]['eta'] \
+                        + lastval0*(1-self.graph.node[node]['delta'])
+                par1term *= (1-lastval1)*self.graph.node[node]['eta'] \
+                        + lastval1*(1-self.graph.node[node]['delta'])
+            par0sum += par0term
+            par1sum += par1term
+
+        par0sum /= (1-self.graph.node[cond]['marginal'])
+        par1sum /= self.graph.node[cond]['marginal']
+
+        return (par0sum, par1sum)
 
     def init_db(self, db, size):
         """ Takes a Pytables Group object (group) and the total number of samples expected and
@@ -182,3 +245,6 @@ class TreeNet():
 
 if __name__ == '__main__':
     t = TreeNet(6)
+    for i in range(500):
+        t.propose()
+
