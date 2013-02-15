@@ -1,17 +1,19 @@
 from __future__ import division
 
-import numpy as np
-from numpy import log2
-import pylab as p
-import networkx as nx
-import random
-from math import log, exp, pi, lgamma
 
+import numpy as np
+import networkx as nx
+import pylab as p
 import scipy.stats as st
+import tables as t
+import random
+
+from math import log, exp, pi, lgamma
+from numpy import log2
 
 class TreeNet():
     def __init__(self, numnodes, data=None, template=None, priorweight=1.0,
-            verbose=False, graph=None):
+            verbose=False, ground=None, graph=None):
         if graph is None:
             self.graph = nx.DiGraph()
             self.graph.add_nodes_from(range(numnodes), marginal=0.5, 
@@ -25,9 +27,18 @@ class TreeNet():
         self.template = template
         self.priorweight = priorweight
         self.verbose = verbose
+        self.ground = ground
 
         self.oldgraph = None
         self.memo_entropy = None
+
+    def copy(self):
+        return self.graph.copy()
+
+    def global_edge_presence(self):
+        mat = np.array(nx.to_numpy_matrix(self.graph),dtype=np.int32)
+        groundmat = np.array(nx.to_numpy_matrix(self.ground.graph),dtype=np.int32)
+        return float(np.abs(mat - groundmat).sum()) / self.graph.number_of_nodes()**2
 
     def propose(self):
         self.oldgraph = self.graph.copy()
@@ -148,7 +159,7 @@ class TreeNet():
     def energy(self):
         e = 0.0
         for row in self.data:
-            for i,p in self.g.node.iteritems():
+            for i,p in self.graph.node.iteritems():
                 thisval = row[i]
                 if np.isnan(p['eta']):
                     marg = p['marginal']
@@ -306,8 +317,21 @@ def generateTree(nodes = 5, clusters = 2):
             g.node[i]['delta'] = np.nan
             g.node[i]['eta'] = np.nan
             g.node[i]['marginal'] = np.random.rand()
-
     return g
+
+def generateData(g, num):
+    topo = nx.topological_sort(g)
+    data = np.zeros((num, g.number_of_nodes()), dtype=np.int32)
+    for i in range(num):
+        for j in topo:
+            params = g.node[j]
+            if np.isnan(params['eta']): # No parents
+                data[i,j] = int(np.random.rand() < params['marginal'])
+            else:
+                parstate = data[i, g.predecessors(j)[0]]
+                data[i,j] = int( np.random.rand() < ( (1-params['delta']) if parstate else params['eta']))
+
+    return data
 
 if __name__ == '__main__':
     empty = TreeNet(3)
