@@ -1,6 +1,7 @@
 from __future__ import division
 
 import numpy as np
+from numpy import log2
 import pylab as p
 import networkx as nx
 import random
@@ -10,15 +11,20 @@ import scipy.stats as st
 
 class TreeNet():
     def __init__(self, numnodes, data=None, template=None, priorweight=1.0,
-            verbose=False, ground=None):
-        self.graph = nx.DiGraph()
-        self.graph.add_nodes_from(range(numnodes), marginal=0.5, 
-                delta=np.nan, eta=np.nan)
+            verbose=False, graph=None):
+        if graph is None:
+            self.graph = nx.DiGraph()
+            self.graph.add_nodes_from(range(numnodes), marginal=0.5, 
+                    delta=np.nan, eta=np.nan)
+        else:
+            assert graph.number_of_nodes() == numnodes
+            self.graph = graph.copy()
+
+        assert data is None or data.shape[1] == numnodes
         self.data = data
         self.template = template
         self.priorweight = priorweight
         self.verbose = verbose
-        self.ground = ground
 
         self.oldgraph = None
         self.memo_entropy = None
@@ -84,6 +90,47 @@ class TreeNet():
             #print(len(g.edges())) # and by this, I mean that we rarely (if ever)
             # 'saturate' the network with connections (or aka evaluate fully
             # connected networks).
+    
+    def clear_memory(self):
+        self.memo_entropy = None
+        #for n,p in self.graph.node.iteritems():
+            #if not np.isnan(p['eta']): #has parents
+                #p['marginal'] = np.nan
+
+    def add_edge(self, n1, n2, delta=None, eta=None):
+        self.clear_memory()
+        assert np.isnan(self.graph.node[n2]['eta']), "Node %d already has a parent!" % n2
+        self.graph.add_edge(n1,n2)
+        if delta is not None:
+            self.graph.node[n2]['delta'] = delta 
+        else:
+            self.graph.node[n2]['delta'] = st.beta.rvs(0.4,0.4)
+        if eta is not None:
+            self.graph.node[n2]['eta'] = eta
+        else:
+            self.graph.node[n2]['eta'] = st.beta.rvs(0.4,0.4)
+        self.graph.node[n2]['marginal'] = np.nan
+        assert nx.is_directed_acyclic_graph(self.graph)
+
+    def rem_edge(self, n1, n2, marginal=None):
+        self.clear_memory()
+        assert (n1,n2) in self.graph.edges(), "Edge does not exist in graph"
+        self.graph.remove_edge(n1,n2)
+        self.graph.node[n2]['delta'] = np.nan
+        self.graph.node[n2]['eta'] = np.nan
+        if marginal is None:
+            self.graph.node[n2]['marginal'] = marginal
+        else:
+            self.graph.node[n2]['marginal'] = np.random.rand()
+        assert nx.is_directed_acyclic_graph(self.graph)
+
+    def set_params(self, node, delta, eta, marginal):
+        self.clear_memory()
+        assert node in self.graph.nodes()
+        self.graph.node[node]['delta'] = delta
+        self.graph.node[node]['eta'] = eta
+        self.graph.node[node]['marginal'] = marginal
+        assert nx.is_directed_acyclic_graph(self.graph)
 
     def reject(self):
         self.graph = self.oldgraph
@@ -127,13 +174,15 @@ class TreeNet():
         for i,p in self.graph.node.iteritems():
             if np.isnan(p['eta']): # No parent
                 marg = p['marginal']
-                h -= marg*log(marg) + (1-marg)*log(1-marg)
+                h -= marg*log2(marg) + (1-marg)*log2(1-marg)
             else:
                 delta = p['delta']
                 eta = p['eta']
                 parmarg = self.graph.node[self.graph.predecessors(i)[0]]['marginal']
-                h -= parmarg*(delta*log(delta) + (1-delta)*log(1-delta))
-                h -= (1-parmarg)*(eta*log(eta) + (1-eta)*log(1-eta))
+                if delta != 0.0 and delta != 1.0: # FIXME: Float comparisons
+                    h -= parmarg*(delta*log2(delta) + (1-delta)*log2(1-delta))
+                if eta != 0.0 and eta != 1.0: # FIXME: Float comparisons
+                    h -= (1-parmarg)*(eta*log2(eta) + (1-eta)*log2(1-eta))
 
         self.memo_entropy = h
         return h
@@ -146,14 +195,14 @@ class TreeNet():
             if np.isnan(p['eta']): # No parent
                 marg = p['marginal']
                 othermarg = other.graph.node[i]['marginal']
-                div -= marg*log(othermarg) + (1-marg)*log(1-othermarg)
+                div -= marg*log2(othermarg) + (1-marg)*log2(1-othermarg)
             else:
                 parent = self.graph.predecessors(i)[0]
                 parmarg = self.graph.node[parent]['marginal']
 
                 cond = self.cond_prob(i, parent)
-                div -= parmarg*(cond[1]*log(1-p['delta']) + (1-cond[1])*log(p['delta'])) \
-                    + (1-parmarg)*(cond[0]*log(p['eta']) + (1-cond[0])*log(1-p['eta'])) # parent = 0
+                div -= parmarg*(cond[1]*log2(1-p['delta']) + (1-cond[1])*log2(p['delta'])) \
+                    + (1-parmarg)*(cond[0]*log2(p['eta']) + (1-cond[0])*log2(1-p['eta'])) # parent = 0
         return div
 
     def cond_prob(self, node, cond):
@@ -243,8 +292,36 @@ class TreeNet():
             root.objfxn.kld.append((self.ground.kld(self),))
             root.objfxn.edge_distance.append((self.global_edge_presence(),))
 
+def generateTree(nodes = 5, clusters = 2):
+    g = nx.DiGraph()
+    for i in range(nodes):
+        g.add_node(i)
+        if i >= clusters:
+            candidates = set(g.nodes()) - set([i])
+            g.add_edge(random.choice(list(candidates)), i)
+            g.node[i]['delta'] = st.beta.rvs(0.4,0.4)
+            g.node[i]['eta'] = st.beta.rvs(0.4,0.4)
+            g.node[i]['marginal'] = np.nan
+        else:
+            g.node[i]['delta'] = np.nan
+            g.node[i]['eta'] = np.nan
+            g.node[i]['marginal'] = np.random.rand()
+
+    return g
+
 if __name__ == '__main__':
+    empty = TreeNet(3)
+    assert empty.entropy() == 3.0
+
+    connected = TreeNet(3)
+    connected.add_edge(0,1,0.0,0.0)
+    connected.add_edge(1,2,0.0,0.0)
+    assert connected.entropy() == 1.0
+    assert connected.kld(empty) == 2.0
+
     t = TreeNet(6)
     for i in range(500):
         t.propose()
+
+
 
