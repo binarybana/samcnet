@@ -6,6 +6,7 @@ cde.options
 cde-package
 *.so
 .exps
+.tmp
 config.py
 env
 mon.py
