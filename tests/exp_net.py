@@ -12,10 +12,10 @@ import networkx as nx
 import samcnet.utils as utils
 
 try:
-    from samc import SAMCRun
-    from bayesnet import BayesNet
-    from bayesnetcpd import BayesNetCPD
-    from generator import *
+    from samcnet.samc import SAMCRun
+    from samcnet.bayesnet import BayesNet
+    from samcnet.bayesnetcpd import BayesNetCPD
+    from samcnet.generator import *
 except ImportError as e:
     sys.exit("Make sure LD_LIBRARY_PATH is set correctly and that the build"+\
             " directory is populated by waf.\n\n %s" % str(e))
@@ -30,18 +30,18 @@ if 'WORKHASH' in os.environ:
 ############### /SAMC Setup ############### 
 
 N = 4
-iters = 5e5
+iters = 1e6
 numdata = 20
 priorweight = 5
 numtemplate = 5
-burn = 100000
+burn = 10000
 stepscale=100000
-temperature = 1.0
+temperature = 5.0
 thin = 100
-refden = 2.0
+refden = 0.0
 
-random.seed(123456)
-np.random.seed(123456)
+random.seed(12345)
+np.random.seed(12345)
 
 groundgraph = generateHourGlassGraph(nodes=N)
 data, states, joint = generateData(groundgraph,numdata,method='noisylogic')
