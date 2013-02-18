@@ -302,10 +302,10 @@ class TreeNet():
         temp['edge_distance']  = 'Proportion of incorrect edges |M-X|/n^2'
         objroot._v_attrs.descs = temp
 
-        #if self.verbose:
-            #N = self.x.size
-            #db.createEArray(objroot.samples, 'mat', t.UInt8Atom(), shape=(0,N,N),
-                    #expectedrows=size)
+        if self.verbose:
+            N = self.graph.number_of_nodes()
+            db.createEArray(objroot.samples, 'mat', t.UInt8Atom(), shape=(0,N,N),
+                    expectedrows=size)
 
     def save_iter_db(self, db):
         """ Saves objective function (and possible samples depending on verbosity) to
@@ -313,8 +313,9 @@ class TreeNet():
         """ 
         root = db.root.object
         root.objfxn.entropy.append((self.entropy(),))
-        #if self.verbose:
-            #root.samples.mat.append((self.mat,))
+        if self.verbose:
+            mat = np.array(nx.to_numpy_matrix(self.graph),dtype=np.int32)
+            root.samples.mat.append((mat,))
         if self.ground:
             root.objfxn.kld.append((self.ground.kld(self),))
             root.objfxn.edge_distance.append((self.global_edge_presence(),))
