@@ -143,7 +143,7 @@ cdef class SAMCRun:
         samcroot._v_attrs.curr_delta = self.delta
 
         samcroot._v_attrs.stepscale = self.stepscale
-        samcroot._v_attrs.refden = self.refden
+        samcroot._v_attrs.refden_power = self.refden_power
         samcroot._v_attrs.burnin = self.burn
         samcroot._v_attrs.thin = self.thin
         samcroot._v_attrs.curr_iteration = self.iteration
