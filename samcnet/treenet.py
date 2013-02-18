@@ -293,6 +293,8 @@ class TreeNet():
             db.createEArray(objroot.objfxn, 'kld', t.Float64Atom(), (0,), expectedrows=size)
             db.createEArray(objroot.objfxn, 'edge_distance', t.Float64Atom(), (0,), expectedrows=size)
             objroot._v_attrs.true_entropy = self.ground.entropy()
+            objroot._v_attrs.true_energy = self.ground.energy()
+            objroot._v_attrs.true_numedges = self.ground.graph.number_of_edges()
 
         temp = {}
         temp['entropy'] = 'Entropy in bits'
