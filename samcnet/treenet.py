@@ -169,10 +169,14 @@ class TreeNet():
                     delta = p['delta']
                     eta = p['eta']
                     parval = row[self.graph.predecessors(i)[0]]
-                    e -= log(thisval*parval*(1-delta) + \
+                    prob = thisval*parval*(1-delta) + \
                             thisval*(1-parval)*eta + \
                             (1-thisval)*parval*delta + \
-                            (1-thisval)*(1-parval)*(1-eta))
+                            (1-thisval)*(1-parval)*(1-eta)
+                    if prob < 1e-300:
+                        e -= -1000.0
+                    else:
+                        e -= log(prob)
 
         # Here I should penalize number of edges and edges that don't 
         # match to the template (with the priorweighting too).
@@ -288,6 +292,13 @@ class TreeNet():
             db.createEArray(objroot.objfxn, 'kld', t.Float64Atom(), (0,), expectedrows=size)
             db.createEArray(objroot.objfxn, 'edge_distance', t.Float64Atom(), (0,), expectedrows=size)
             objroot._v_attrs.true_entropy = self.ground.entropy()
+
+        temp = {}
+        temp['entropy'] = 'Entropy in bits'
+        temp['kld']  = 'KL-Divergence from true network in bits'
+        temp['edge_distance']  = 'Proportion of incorrect edges |M-X|/n^2'
+        objroot._v_attrs.descs = temp
+
         #if self.verbose:
             #N = self.x.size
             #db.createEArray(objroot.samples, 'mat', t.UInt8Atom(), shape=(0,N,N),
