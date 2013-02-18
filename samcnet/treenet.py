@@ -92,7 +92,8 @@ class TreeNet():
             g.node[n1]['marginal'] = np.random.rand()
 
         #print len(g.edges())
-        trav = nx.dfs_preorder_nodes(g,n1)
+        trav = nx.dfs_preorder_nodes(g,n1) # FIXME, this may be a problem, dfs_preorder 
+        # was not what I thought it was before
         trav.next()
         for node in trav:
             g.node[node]['marginal'] = np.nan #invalidate downstream cached marginals
@@ -149,11 +150,11 @@ class TreeNet():
 
     def ve(self):
         g = self.graph
-        for node in nx.dfs_preorder_nodes(g):
+        for node in nx.topological_sort(g):
             params = g.node[node]
             if np.isnan(params['marginal']):
                 predmarg = g.node[g.predecessors(node)[0]]['marginal']
-                params['marginal'] = (1-params['delta'])*predmarg + \
+                g.node[node]['marginal'] = (1-params['delta'])*predmarg + \
                         params['eta']*(1-predmarg)
 
     def energy(self):
@@ -194,7 +195,6 @@ class TreeNet():
                     h -= parmarg*(delta*log2(delta) + (1-delta)*log2(1-delta))
                 if eta != 0.0 and eta != 1.0: # FIXME: Float comparisons
                     h -= (1-parmarg)*(eta*log2(eta) + (1-eta)*log2(1-eta))
-
         self.memo_entropy = h
         return h
 
@@ -208,10 +208,10 @@ class TreeNet():
                 othermarg = other.graph.node[i]['marginal']
                 div -= marg*log2(othermarg) + (1-marg)*log2(1-othermarg)
             else:
-                parent = self.graph.predecessors(i)[0]
-                parmarg = self.graph.node[parent]['marginal']
+                parent = other.graph.predecessors(i)[0]
+                parmarg = other.graph.node[parent]['marginal']
 
-                cond = self.cond_prob(i, parent)
+                cond = self.cond_prob(i, parent) 
                 div -= parmarg*(cond[1]*log2(1-p['delta']) + (1-cond[1])*log2(p['delta'])) \
                     + (1-parmarg)*(cond[0]*log2(p['eta']) + (1-cond[0])*log2(1-p['eta'])) # parent = 0
         return div
@@ -224,7 +224,8 @@ class TreeNet():
         path = list(nx.all_simple_paths(self.graph, node, cond))
         pathalt = list(nx.all_simple_paths(self.graph, cond, node))
         if len(path) == len(pathalt) == 0:
-            return self.graph.node[node]["marginal"]
+            temp = self.graph.node[node]["marginal"]
+            return (temp,temp)
         elif len(path) > 0:
             down = True # Cond is DOWNstream from node
         else:
@@ -286,6 +287,7 @@ class TreeNet():
         if self.ground:
             db.createEArray(objroot.objfxn, 'kld', t.Float64Atom(), (0,), expectedrows=size)
             db.createEArray(objroot.objfxn, 'edge_distance', t.Float64Atom(), (0,), expectedrows=size)
+            objroot._v_attrs.true_entropy = self.ground.entropy()
         #if self.verbose:
             #N = self.x.size
             #db.createEArray(objroot.samples, 'mat', t.UInt8Atom(), shape=(0,N,N),
