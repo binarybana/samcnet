@@ -139,7 +139,9 @@ cdef class SAMCRun:
         samcroot._v_attrs.prop_accept = self.accept_loc
         samcroot._v_attrs.prop_total = self.total_loc
 
-        samcroot._v_attrs.temperature.append(last_temperature)
+        temp = samcroot._v_attrs.temperature
+        temp.append(last_temperature) # For some reason this is necessary...
+        samcroot._v_attrs.temperature = temp
         samcroot._v_attrs.curr_delta = self.delta
 
         samcroot._v_attrs.stepscale = self.stepscale
