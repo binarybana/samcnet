@@ -92,20 +92,20 @@ cdef class SAMCRun:
 
     def init_db(self, size):
         if self.db == None:
-            filt = t.Filters(complib='bzip2', complevel=0, fletcher32=True)
+            filt = t.Filters(complib='bzip2', complevel=7, fletcher32=True)
             if not os.path.exists('.tmp'):
                 print("Creating temp directory: .tmp")
                 os.mkdir('.tmp')
             name = tempfile.mktemp(prefix='samc', dir='.tmp')
             self.db = t.openFile(name, mode = 'w', title='SAMC Run Data', filters=filt)
 
-            self.db.createGroup('/', 'samc', 'SAMC info')
+            self.db.createGroup('/', 'samc', 'SAMC info', filters=filt)
             self.db.createEArray('/samc', 'theta_trace', t.Float64Atom(), (0,), expectedrows=size)
             self.db.createEArray('/samc', 'energy_trace', t.Float64Atom(), (0,), expectedrows=size)
             self.db.createCArray('/samc', 'theta_hist', t.Float64Atom(), (self.grid,))
             self.db.createCArray('/samc', 'freq_hist', t.Int64Atom(), (self.grid,)) 
 
-            objdb = self.db.createGroup('/', 'object', 'Object info')
+            objdb = self.db.createGroup('/', 'object', 'Object info', filters=filt)
             samples = self.db.createGroup(objdb, 'samples', 'Samples')
             objfxn = self.db.createGroup(objdb, 'objfxn', 'Objective function outputs')
             self.db.root.samc._v_attrs.temperature = []
