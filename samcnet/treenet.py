@@ -159,27 +159,28 @@ class TreeNet():
 
     def energy(self):
         e = 0.0
-        for row in self.data:
-            for i,p in self.graph.node.iteritems():
-                thisval = row[i]
-                if np.isnan(p['eta']):
-                    marg = p['marginal']
-                    e -= log(thisval*marg + (1-thisval)*(1-marg))
-                else:
-                    delta = p['delta']
-                    eta = p['eta']
-                    parval = row[self.graph.predecessors(i)[0]]
-                    prob = thisval*parval*(1-delta) + \
-                            thisval*(1-parval)*eta + \
-                            (1-thisval)*parval*delta + \
-                            (1-thisval)*(1-parval)*(1-eta)
-                    if prob < 1e-300:
-                        e -= -1000.0
-                    else:
-                        e -= log(prob)
+        data = self.data
+        for i,p in self.graph.node.iteritems():
+            thisval = data[:,i]
+            if np.isnan(p['eta']):
+                marg = p['marginal']
+                e -= np.log((thisval*marg + (1-thisval)*(1-marg))).sum()
+            else:
+                delta = p['delta']
+                eta = p['eta']
+                parval = data[:,self.graph.predecessors(i)[0]]
+                prob = thisval*(parval*(1-delta) + (1-parval)*eta) + \
+                        (1-thisval)*(parval*delta + (1-parval)*(1-eta))
+                np.clip(prob, 1e-300, 1.0)
+                e -= np.log(prob).sum()
 
-        # Here I should penalize number of edges and edges that don't 
-        # match to the template (with the priorweighting too).
+        mat = np.array(nx.to_numpy_matrix(self.graph),dtype=np.int32)
+        if self.template:
+            tempmat = np.array(nx.to_numpy_matrix(self.template),dtype=np.int32)
+        else:
+            tempmat = np.zeros_like(mat)
+        e += self.priorweight * float(np.abs(mat - tempmat).sum())
+
         return e
 
     def entropy(self):
@@ -359,6 +360,3 @@ if __name__ == '__main__':
     t = TreeNet(6)
     for i in range(500):
         t.propose()
-
-
-
