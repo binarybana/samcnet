@@ -42,55 +42,75 @@ if len(filelist) != r.llen(fulljobhash):
 else:
     print "Found %d datasets from hash %s in cache" % (len(os.listdir(TMPDIR)), jobhash[:5])
 
-first = True
-for d in filelist:
-    fid = t.openFile(os.path.join(TMPDIR, d), 'r')
+def h5_plot(ax, node):
+    first = True
+    for d in filelist:
+        fid = t.openFile(os.path.join(TMPDIR, d), 'r')
+        obj = fid.getNode(node)
 
-    #obj = fid.root.samc.theta_trace
-    #obj2 = fid.root.samc.energy_trace
-    #obj = fid.root.samc.freq_hist
-    #obj = fid.root.samc.energy_trace
-    #obj = fid.root.object.objfxn.entropy
-    #obj = fid.root.object.objfxn.edge_distance
-    obj = fid.root.computed.cummeans.kld
-    #obj = fid.root.computed.cummeans.entropy
-    #obj = fid.root.computed.cummeans.edge_distance
-    label = obj.name
-    #p.plot(obj.read(), 'b', alpha=0.4)
-    #p.plot(obj.read(), obj2.read(), 'b.', alpha=0.4)
-    if first:
-        p.plot(obj.read(), 'b', alpha=0.4, label=label)
-    else:
-        p.plot(obj.read(), 'b', alpha=0.4)
-    first = False
+        label = obj.name
+        #p.plot(obj.read(), 'b', alpha=0.4)
+        #p.plot(obj.read(), obj2.read(), 'b.', alpha=0.4)
+        if first:
+            ax.plot(obj.read(), 'b', alpha=0.4, label=label)
+        else:
+            ax.plot(obj.read(), 'b', alpha=0.4)
+        first = False
+        if 'descs' in fid.root.object._v_attrs and label in fid.root.object._v_attrs.descs:
+            p.ylabel(fid.root.object._v_attrs.descs[label])
+        fid.close()
+    ax.grid(True)
+    ax.legend()
+        #n = len(res)
+        #indices = np.linspace(0,1,n)
+        #for i,val in enumerate(res):
+            #if type(val) == np.ndarray:
+                #p.plot(val, alpha=0.4, color='blue')#color=p.cm.jet(indices[i]))
+                ##print indices[i], p.cm.jet(indices[i])
+            #else:
+                #print val
 
-    fid.close()
+#obj = fid.root.samc.theta_trace
+#obj2 = fid.root.samc.energy_trace
+#obj = fid.root.samc.freq_hist
+#obj = fid.root.samc.energy_trace
+#obj = fid.root.object.objfxn.entropy
+#obj = fid.root.object.objfxn.edge_distance
+#obj = fid.root.computed.cummeans.kld
+#obj = fid.root.computed.cummeans.entropy
+#obj = fid.root.computed.cummeans.edge_distance
 
-    #n = len(res)
-    #indices = np.linspace(0,1,n)
-    #for i,val in enumerate(res):
-        #if type(val) == np.ndarray:
-            #p.plot(val, alpha=0.4, color='blue')#color=p.cm.jet(indices[i]))
-            ##print indices[i], p.cm.jet(indices[i])
-        #else:
-            #print val
+plot_list = ['/samc/freq_hist', 
+            '/computed/cummeans/entropy', 
+            '/computed/cummeans/kld', 
+            '/computed/cummeans/edge_distance']
+p.figure()
+for i,node in enumerate(plot_list):
+    h5_plot(p.subplot(len(plot_list), 1, i+1), node)
+    if i==0:
+        p.title(r.hget('jobs:descs', jobhash) + "\n" + \
+                'Experiment version: ' + jobhash[:5] + '\n' + \
+                'Code version: ' + r.hget('jobs:githashes', jobhash)[:5])
 
 # Grab info that should be identical for all samples
-fid = t.openFile(os.path.join(TMPDIR, d), 'r')
+fid = t.openFile(os.path.join(TMPDIR, '0'), 'r')
 print("###### SAMC ######")
 for name in fid.root.samc._v_attrs._f_list('user'):
     print("%30s:\t%s" % (name, str(fid.root.samc._v_attrs[name])))
 print("###### Object ######")
 for name in fid.root.object._v_attrs._f_list('user'):
     print("%30s:\t%s" % (name, str(fid.root.object._v_attrs[name])))
-if 'descs' in fid.root.object._v_attrs and label in fid.root.object._v_attrs.descs:
-    p.ylabel(fid.root.object._v_attrs.descs[label])
 fid.close()
+
+if True:
+    import cPickle as cp
+    import networkx as nx
+    import subprocess as sb
+    x = r.hget('jobs:grounds', jobhash)
+    z = cp.loads(zlib.decompress(x))
+    nx.write_dot(z.graph, '/tmp/tmp.dot')
+    sb.call('dot /tmp/tmp.dot -Tpng -o /tmp/tmp.png'.split())
+
 p.xlabel('Samples obtained after burnin (after thinning)')
-p.title(r.hget('jobs:descs', jobhash) + "\n" + \
-        'Experiment version: ' + jobhash[:5] + '\n' + \
-        'Code version: ' + r.hget('jobs:githashes', jobhash)[:5])
-p.grid(True)
-p.legend()
 
 p.show()
