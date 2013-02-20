@@ -67,7 +67,7 @@ cdef class SAMCRun:
         print "Done. Setting limits to (%d, %d)" % (low,high)
 
         spread = high - low
-        self.scale = max(0.25, spread/500.0)
+        self.scale = max(0.25, spread/100.0)
         print "Setting scale to %f" % (self.scale)
 
         self.lowEnergy = <int>low
