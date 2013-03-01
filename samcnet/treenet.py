@@ -209,12 +209,12 @@ class TreeNet():
         other.ve()
         for i,p in other.graph.node.iteritems(): # note other here
             if np.isnan(p['eta']): # No parent
-                marg = p['marginal']
-                othermarg = other.graph.node[i]['marginal']
+                othermarg = p['marginal']
+                marg = self.graph.node[i]['marginal']
                 div -= marg*log2(othermarg) + (1-marg)*log2(1-othermarg)
             else:
                 parent = other.graph.predecessors(i)[0]
-                parmarg = other.graph.node[parent]['marginal']
+                parmarg = self.graph.node[parent]['marginal']
 
                 cond = self.cond_prob(i, parent) 
                 div -= parmarg*(cond[1]*log2(1-p['delta']) + (1-cond[1])*log2(p['delta'])) \
@@ -359,6 +359,18 @@ if __name__ == '__main__':
     connected.add_edge(1,2,0.0,0.0)
     assert connected.entropy() == 1.0
     assert connected.kld(empty) == 2.0
+
+    random.seed(1234)
+    np.random.seed(1234)
+    con = TreeNet(4)
+    rcon = TreeNet(4)
+    for i in range(1000):
+        kl1 = rcon.kld(con)
+        kl2 = con.kld(rcon)
+        assert (kl1 >= 0.0)
+        assert (kl2 >= 0.0)
+        rcon.propose()
+        con.propose()
 
     t = TreeNet(6)
     for i in range(500):
