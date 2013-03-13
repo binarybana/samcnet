@@ -3,6 +3,7 @@ import sys
 import redis
 import random
 import numpy as np
+import zlib
 try:
     from samcnet import samc,lori,utils
 except ImportError as e:
@@ -25,18 +26,14 @@ c = lori.Classification()
 random.seed()
 np.random.seed()
 
-s = samc.SAMCRun(c, burn=10000, stepscale=100, refden=0, thin=100)
-s.sample(5e5)
+s = samc.SAMCRun(c, burn=10, stepscale=100, refden=0, thin=10)
+s.sample(4e4)
 
-res = []
-def make_acc(n):
-    return eval ("lambda x: x%s" %n)
-for acc in [lambda x: x[0][0], lambda x: x[1][1], lambda x: x[2][0,0], make_acc("[-1]")]:
-    for get in [s.func_mean, s.func_cummean]:
-        res.append(get(acc))
-
-res_wire = utils.prepare_data([utils.encode_element(x) for x in res])
+s.compute_means()
 
 if 'WORKHASH' in os.environ:
-    r.lpush('jobs:done:'+os.environ['WORKHASH'], res_wire)
+    r.lpush('jobs:done:'+os.environ['WORKHASH'], s.read_db())
+else: 
+    with open('/tmp/data.h5', 'w') as fid:
+        fid.write(zlib.decompress(s.read_db()))
 

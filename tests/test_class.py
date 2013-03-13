@@ -21,15 +21,7 @@ c = lori.Classification()
 s = samc.SAMCRun(c, burn=10, stepscale=10, refden=0, thin=10)
 s.sample(100)
 
-res = []
-def make_acc(n):
-    return eval ("lambda x: x%s" %n)
-for acc in [lambda x: x[0][0], lambda x: x[1][1], lambda x: x[2][0,0], make_acc("[-1]")]:
-    for get in [s.func_mean, s.func_cummean]:
-        res.append(get(acc))
-
-res_wire = utils.prepare_data([utils.encode_element(x) for x in res])
+s.compute_means()
 
 if 'WORKHASH' in os.environ:
-    r.lpush('jobs:done:'+os.environ['WORKHASH'], res_wire)
-
+    r.lpush('jobs:done:'+os.environ['WORKHASH'], s.read_db())

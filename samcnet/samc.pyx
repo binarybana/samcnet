@@ -176,13 +176,15 @@ cdef class SAMCRun:
         if not 'means' in self.db.root.computed:
             meangroup = self.db.createGroup('/computed', 'means', 'Means')
         for item in self.db.walkNodes('/object'):
-            if isinstance(item, t.array.Array) and len(item.shape)==1:
+            if isinstance(item, t.array.Array):
                 funcs = item.read().astype(np.float)
-                numerator = (part * funcs).cumsum()
+                numerator = (part * funcs.T).T.cumsum(axis=0)
                 if item.name in cumgroup:
                     raise Exception("Not implemented yet: multiple calls to func_cummean")
-                arr = self.db.createCArray(cumgroup, item.name, t.Float64Atom(), (thetas.size,))
-                arr[:] = numerator / denom
+                arr = self.db.createCArray(cumgroup, item.name, 
+                        t.Float64Atom(shape=funcs[-1].shape), 
+                        (thetas.size,))
+                arr[:] = (numerator.T / denom).T
                 meangroup._v_attrs[item.name] = arr[-1]
 
     cdef find_region(self, energy):

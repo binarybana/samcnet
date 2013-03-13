@@ -2,6 +2,7 @@ from __future__ import division
 
 import numpy as np
 import pylab as p
+import tables as t
 import matplotlib as mpl
 import random
 from math import log, exp, pi, lgamma
@@ -14,9 +15,9 @@ from scipy.special import betaln
 from statsmodels.sandbox.distributions.mv_normal import MVT,MVNormal
 #from sklearn.qda import QDA
 
-import sys
-sys.path.append('/home/bana/GSP/research/samc/code')
-sys.path.append('/home/bana/GSP/research/samc/code/build')
+#import sys
+#sys.path.append('/home/bana/GSP/research/samc/code')
+#sys.path.append('/home/bana/GSP/research/samc/code/build')
 
 # Borrowed from https://github.com/mattjj/pymattutil/blob/master/stats.py
 def sample_invwishart(lmbda,dof):
@@ -242,12 +243,33 @@ class Classification():
         fx1 = np.exp(logp_normal(grid, record['mu1'], record['sigma1'])).reshape(n,n)
         return (fx0, fx1)
 
-    def save_to_db(self):
-        return (self.mu0,
-                self.mu1,
-                self.sigma0.copy(),
-                self.sigma1.copy(),
-                self.c)
+    def init_db(self, db, size):
+        """ Takes a Pytables Group object (group) and the total number of samples expected and
+        expands or creates the necessary groups.
+        """
+        objroot = db.root.object
+        db.createEArray(objroot.objfxn, 'mu0', t.Float64Atom(shape=(2,)), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'mu1', t.Float64Atom(shape=(2,)), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'sigma0', t.Float64Atom(shape=(2,2)), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'sigma1', t.Float64Atom(shape=(2,2)), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'c', t.Float64Atom(), (0,), expectedrows=size)
+        objroot._v_attrs.true_dict = self.true
+        #temp = {}
+        #temp['entropy'] = 'Entropy in bits'
+        #temp['kld']  = 'KL-Divergence from true network in bits'
+        #temp['edge_distance']  = 'Proportion of incorrect edges |M-X|/n^2'
+        #objroot._v_attrs.descs = temp
+
+    def save_iter_db(self, db):
+        """ Saves objective function (and possible samples depending on verbosity) to
+        Pytables db
+        """ 
+        root = db.root.object
+        root.objfxn.mu0.append((self.mu0,))
+        root.objfxn.mu1.append((self.mu1,))
+        root.objfxn.sigma0.append((self.sigma0,))
+        root.objfxn.sigma1.append((self.sigma1,))
+        root.objfxn.c.append((self.c,))
 
     def get_grid(self):
         samples = np.vstack((self.draw_from_true(0), self.draw_from_true(1)))
