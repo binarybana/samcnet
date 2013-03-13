@@ -42,33 +42,31 @@ if len(filelist) != r.llen(fulljobhash):
 else:
     print "Found %d datasets from hash %s in cache" % (len(os.listdir(TMPDIR)), jobhash[:5])
 
-def h5_plot(ax, node):
+def h5_plot(ax, node, ylabel=None):
     first = True
     for d in filelist:
         fid = t.openFile(os.path.join(TMPDIR, d), 'r')
         obj = fid.getNode(node)
-
         label = obj.name
-        #p.plot(obj.read(), 'b', alpha=0.4)
-        #p.plot(obj.read(), obj2.read(), 'b.', alpha=0.4)
-        if first:
-            ax.plot(obj.read(), 'b', alpha=0.4, label=label)
+        if label == 'freq_hist':
+            x = np.linspace(fid.root.samc._v_attrs['lowEnergy'],
+                    fid.root.samc._v_attrs['highEnergy'], 
+                    fid.root.samc._v_attrs['grid'])
         else:
-            ax.plot(obj.read(), 'b', alpha=0.4)
+            x = np.arange(obj.read().size)
+        if first:
+            ax.plot(x, obj.read(), 'b', alpha=0.4, label=label)
+        else:
+            ax.plot(x, obj.read(), 'b', alpha=0.4)
         first = False
         if 'descs' in fid.root.object._v_attrs and label in fid.root.object._v_attrs.descs:
-            p.ylabel(fid.root.object._v_attrs.descs[label])
+            if ylabel:
+                p.ylabel(ylabel)
+            else:
+                p.ylabel(fid.root.object._v_attrs.descs[label])
         fid.close()
     ax.grid(True)
     ax.legend()
-        #n = len(res)
-        #indices = np.linspace(0,1,n)
-        #for i,val in enumerate(res):
-            #if type(val) == np.ndarray:
-                #p.plot(val, alpha=0.4, color='blue')#color=p.cm.jet(indices[i]))
-                ##print indices[i], p.cm.jet(indices[i])
-            #else:
-                #print val
 
 #obj = fid.root.samc.theta_trace
 #obj2 = fid.root.samc.energy_trace
@@ -80,13 +78,19 @@ def h5_plot(ax, node):
 #obj = fid.root.computed.cummeans.entropy
 #obj = fid.root.computed.cummeans.edge_distance
 
-plot_list = ['/samc/freq_hist', 
+plot_list = [
+            #'/samc/freq_hist', 
             '/computed/cummeans/entropy', 
             '/computed/cummeans/kld', 
             '/computed/cummeans/edge_distance']
+label_list = [
+            #'Samples from energy',
+            'Entropy in bits',
+            'KLD in bits',
+            'Incorrect edge proportion']
 p.figure()
 for i,node in enumerate(plot_list):
-    h5_plot(p.subplot(len(plot_list), 1, i+1), node)
+    h5_plot(p.subplot(len(plot_list), 1, i+1), node, label_list[i])
     if i==0:
         p.title(r.hget('jobs:descs', jobhash) + "\n" + \
                 'Experiment version: ' + jobhash[:5] + '\n' + \
