@@ -68,6 +68,218 @@ def logp_normal(x, mu, sigma, nu=1.0):
             * (x-mu)).sum(axis=axis)
     return t1+t2+t3
 
+class Johnson():
+    def __init__(self, **kw):
+        seed = np.random.randint(10**6)
+        print "Seed is %d" % seed
+        np.random.seed(seed)
+
+        #### Ground Truth Parameters 
+        true = {0:{'mu':0.0, 'sigma':0.7413, 'gamma':-1.2, 'delta':0.9}, 
+                1:{'mu':0.0, 'sigma':0.7413, 'gamma':1.2, 'delta':0.9},
+                'type0':'SU',
+                'type1':'SU',
+                'n':30}
+
+        for k in kw:
+            if type(params[k]) == dict:
+                true[k].update(params[k])
+            else:
+                true[k] = params[k]
+        self.true = true
+        self.n = true['n'] # Data points
+        self.n0 = int(true['c'] * n)
+        self.n1 = n - self.n0 # not really random, but we're not so interested in this
+        # source of variation
+        self.true['n0'] = self.n0
+        self.true['n1'] = self.n1
+
+        ######## Generate Data ########
+        
+        self.dist0 = di.johnsonsu if true['type0'] == 'SU' else di.johnsonsb
+        self.dist1 = di.johnsonsu if true['type1'] == 'SU' else di.johnsonsb
+        data0 = func0.rvs(loc=true[0]['mu'], scale=true[0]['sigma'], self.n0)
+        data1 = func1.rvs(loc=true[1]['mu'], scale=true[1]['sigma'], self.n1)
+
+        self.data = np.vstack(( data0, data1 ))
+
+        self.mask0 = np.hstack((
+            np.ones(self.n0, dtype=np.bool),
+            np.zeros(self.n1, dtype=np.bool)))
+        self.mask1 = np.logical_not(self.mask0)
+
+        ######## Starting point of MCMC Run #######
+        self.init_params()
+
+        ###### Bookeeping ######
+        self.oldmu0 = None
+        self.oldsigma0 = None
+        self.oldgamma0 = None
+        self.olddelta0 = None
+        self.oldmu1 = None
+        self.oldsigma1 = None
+        self.oldgamma1 = None
+        self.olddelta1 = None
+        self.oldc = None
+
+        self.propmu = 0.2
+        self.propdelta = 0.2
+        self.propgamma = 0.2
+
+        ### Prior for c ###
+        self.alpha0 = 1.0
+        self.alpha1 = 1.0
+
+    def init_params(self):
+        self.mu0 = self.data[self.mask0].mean()
+        self.mu1 = self.data[self.mask1].mean()
+        self.sigma0 = di.invgamma.rvs(2)
+        self.sigma1 = di.invgamma.rvs(2)
+        self.gamma0 = 0.0
+        self.gamma1 = 0.0
+        self.delta0 = 2.0
+        self.delta1 = 2.0
+        self.c = np.random.rand()
+
+    def propose(self):
+        self.oldmu0 = self.mu0
+        self.oldmu1 = self.mu1
+        self.oldsigma0 = self.sigma0
+        self.oldsigma1 = self.sigma1
+        self.oldgamma0 = self.gamma0
+        self.oldgamma1 = self.gamma1
+        self.olddelta0 = self.delta0
+        self.olddelta1 = self.delta1
+        self.oldc = self.c
+
+        if np.random.rand() < 0.01: # Random restart
+            self.init_params()
+        else:
+
+            add = np.random.randn()*0.1
+            self.c += add
+            if self.c >= 1.0:
+                self.c -= self.c - 1 + 0.01
+            elif self.c <= 0.0:
+                self.c = abs(self.c) + 0.01
+
+            self.mu0 += (np.random.rand()-0.5)*self.propmu
+            self.mu1 += (np.random.rand()-0.5)*self.propmu
+            self.sigma0 = di.invgamma.rvs(2)
+            self.sigma1 = di.invgamma.rvs(2)
+            self.gamma0 += (np.random.rand()-0.5)*self.propgamma
+            self.gamma1 += (np.random.rand()-0.5)*self.propgamma
+            self.delta0 += (np.random.rand()-0.5)*self.propdelta
+            self.delta1 += (np.random.rand()-0.5)*self.propdelta
+
+        return 0
+
+    def copy(self):
+        return (self.mu0, self.mu1, self.sigma0, self.sigma1,
+                self.gamma0, self.gamma1, self.c)
+
+    def reject(self):
+        self.mu0 = self.oldmu0
+        self.mu1 = self.oldmu1
+        self.sigma0 = self.oldsigma0
+        self.sigma1 = self.oldsigma1
+        self.gamma0 = self.oldgamma0
+        self.gamma1 = self.oldgamma1
+        self.delta0 = self.olddelta0
+        self.delta1 = self.olddelta1
+        self.c = self.oldc
+
+    def energy(self):
+        sum = 0.0
+        #class 0 negative log likelihood
+        points = self.data[self.mask0]
+        if points.size > 0:
+            sum -= self.dist0.logpdf(points, self.gamma0, self.delta0,
+                    loc=self.mu0, scale=self.sigma0).sum()
+
+        #class 1 negative log likelihood
+        points = self.data[self.mask1]
+        if points.size > 0:
+            sum -= self.dist1.logpdf(points, self.gamma1, self.delta1,
+                    loc=self.mu1, scale=self.sigma1).sum()
+                
+        #Class proportion c (from page 3, eq 1)
+        sum -= log(self.c)*(self.alpha0+self.n0-1) + log(1-self.c)*(self.alpha1+self.n1-1) \
+                - betaln(self.alpha0 + self.n0, self.alpha1 + self.n1)
+
+        #Now add in the priors...
+        # TODO TODO FIXME
+
+        return sum
+
+    def calc_densities(self, line, record):
+        fx0 = self.dist0.logpdf(line,TODO)
+        fx1 = self.dist1.logpdf(line,TODO)
+        return (fx0, fx1)
+
+    def init_db(self, db, size):
+        """ Takes a Pytables Group object (group) and the total number of samples expected and
+        expands or creates the necessary groups.
+        """
+        objroot = db.root.object
+        db.createEArray(objroot.objfxn, 'mu0', t.Float64Atom(), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'mu1', t.Float64Atom(), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'sigma0', t.Float64Atom(), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'sigma1', t.Float64Atom(), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'gamma0', t.Float64Atom(), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'gamma1', t.Float64Atom(), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'delta0', t.Float64Atom(), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'delta1', t.Float64Atom(), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'c', t.Float64Atom(), (0,), expectedrows=size)
+        objroot._v_attrs.true_dict = self.true
+
+    def save_iter_db(self, db):
+        """ Saves objective function (and possible samples depending on verbosity) to
+        Pytables db
+        """ 
+        root = db.root.object
+        root.objfxn.mu0.append((self.mu0,))
+        root.objfxn.mu1.append((self.mu1,))
+        root.objfxn.sigma0.append((self.sigma0,))
+        root.objfxn.sigma1.append((self.sigma1,))
+        root.objfxn.gamma0.append((self.gamma0,))
+        root.objfxn.gamma1.append((self.gamma1,))
+        root.objfxn.delta0.append((self.delta0,))
+        root.objfxn.delta1.append((self.delta1,))
+        root.objfxn.c.append((self.c,))
+
+    #def get_grid(self):
+        #samples = np.vstack((self.draw_from_true(0), self.draw_from_true(1)))
+        #n = 30
+        #lx,hx,ly,hy = np.vstack((samples.min(axis=0), samples.max(axis=0))).T.flatten()
+        #xspread, yspread = hx-lx, hy-ly
+        #lx -= xspread * 0.2
+        #hx += xspread * 0.2
+        #ly -= yspread * 0.2
+        #hy += yspread * 0.2
+        #gextent = (lx,hx,ly,hy)
+        #grid = np.dstack(np.meshgrid(
+                        #np.linspace(lx,hx,n),
+                        #np.linspace(ly,hy,n))).reshape(-1,2)
+        #return n, gextent, grid
+
+    #def calc_analytic(self, grid_n, grid):
+        ## Expectation of C from page 3 eq. 1 using beta conjugate prior
+        #ag = (self.fx0.logpdf(grid) - self.fx1.logpdf(grid) \
+                #+ log(self.Ec) - log(1-self.Ec)).reshape(grid_n,-1)
+        #afx0 = self.fx0.logpdf(grid).reshape(grid_n, -1)
+        #afx1 = self.fx1.logpdf(grid).reshape(grid_n, -1)
+        #return afx0, afx1, ag
+
+    def draw_from_true(self, cls, n=100):
+        if cls == 0:
+            mu = self.true['mu0']
+            sigma = self.true['sigma0']
+        return np.random.multivariate_normal(mu, sigma, n)
+        else:
+            mu = self.true['mu1']
+            sigma = self.true['sigma1']
+
 class Classification():
     def __init__(self):
         seed = np.random.randint(10**6)
@@ -165,6 +377,11 @@ class Classification():
         self.S1star = self.priorsigma1 + (self.n1-1)*sample1cov + self.nu1*self.n1/(self.nu1+self.nu1)\
                 * np.outer((sample1mean - self.priormu1), (sample1mean - self.priormu1))
                 
+
+        self.analytic = {'c': ,
+                        'mu0': self.mu0star,
+                        'mu1': self.mu1star,
+
         #### Now calculate effective class conditional densities from eq 55
         #### page 21
 
@@ -293,25 +510,6 @@ class Classification():
         afx0 = self.fx0.logpdf(grid).reshape(grid_n, -1)
         afx1 = self.fx1.logpdf(grid).reshape(grid_n, -1)
         return afx0, afx1, ag
-
-    #def estimate_sample_means(self, n, grid, db):
-        #fxlist = [self.calc_densities(grid,n,x) for x in db]
-        #fx0list = np.asarray([x[0] for x in fxlist])
-        #fx1list = np.asarray([x[1] for x in fxlist])
-        #if self.mhtype=='mh': 
-            #fx0avg = np.dstack(fx0list).mean(axis=2)
-            #fx1avg = np.dstack(fx1list).mean(axis=2)
-            #cmean = db['c'].mean()
-        #elif self.mhtype=='samc': 
-            #part = np.exp(db['theta'] - db['theta'].max())
-            #numerator0 = (part * fx0list).sum(axis=2)
-            #numerator1 = (part * fx1list).sum(axis=2)
-            #numeratorc = (part * db['c']).sum()
-            #denom = part.sum()
-            #fx0avg, fx1avg, cmean = numerator0/denom, numerator1/denom, numeratorc/denom
-        #else:
-            #raise Exception("NOT IMPLEMENTED: Mean calculation for %s method" % self.mhtype)
-        #return cmean, fx0avg, fx1avg
 
     def draw_from_true(self, cls, n=100):
         if cls == 0:
