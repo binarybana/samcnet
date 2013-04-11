@@ -79,7 +79,8 @@ class Johnson():
                 1:{'mu':0.0, 'sigma':0.7413, 'gamma':1.2, 'delta':0.9},
                 'type0':'SU',
                 'type1':'SU',
-                'n':30}
+                'n':30,
+                'c':0.8}
 
         for k in kw:
             if type(params[k]) == dict:
@@ -88,8 +89,8 @@ class Johnson():
                 true[k] = params[k]
         self.true = true
         self.n = true['n'] # Data points
-        self.n0 = int(true['c'] * n)
-        self.n1 = n - self.n0 # not really random, but we're not so interested in this
+        self.n0 = int(true['c'] * self.n)
+        self.n1 = self.n - self.n0 # not really random, but we're not so interested in this
         # source of variation
         self.true['n0'] = self.n0
         self.true['n1'] = self.n1
@@ -98,10 +99,15 @@ class Johnson():
         
         self.dist0 = di.johnsonsu if true['type0'] == 'SU' else di.johnsonsb
         self.dist1 = di.johnsonsu if true['type1'] == 'SU' else di.johnsonsb
-        data0 = func0.rvs(loc=true[0]['mu'], scale=true[0]['sigma'], self.n0)
-        data1 = func1.rvs(loc=true[1]['mu'], scale=true[1]['sigma'], self.n1)
+        self.true0 = self.dist0(self.true[0]['gamma'], self.true[0]['delta'],
+                    loc=self.true[0]['mu'], scale=self.true[0]['sigma'])
+        self.true1 = self.dist1(self.true[1]['gamma'], self.true[1]['delta'],
+                    loc=self.true[1]['mu'], scale=self.true[1]['sigma'])
 
-        self.data = np.vstack(( data0, data1 ))
+        data0 = self.true0.rvs(size=self.n0)
+        data1 = self.true1.rvs(size=self.n1)
+
+        self.data = np.hstack(( data0, data1 ))
 
         self.mask0 = np.hstack((
             np.ones(self.n0, dtype=np.bool),
@@ -172,6 +178,9 @@ class Johnson():
             self.delta0 += (np.random.rand()-0.5)*self.propdelta
             self.delta1 += (np.random.rand()-0.5)*self.propdelta
 
+            # TODO Probably need to check if this is actually
+            # a valid set of parameters
+
         return 0
 
     def copy(self):
@@ -209,12 +218,31 @@ class Johnson():
 
         #Now add in the priors...
         # TODO TODO FIXME
-
         return sum
 
-    def calc_densities(self, line, record):
-        fx0 = self.dist0.logpdf(line,TODO)
-        fx1 = self.dist1.logpdf(line,TODO)
+    def get_grid(self):
+        samples = np.array([self.true0.mean(), self.true1.mean()])
+        n = 100
+        l,h = samples.min(), samples.max()
+        spread = (self.true0.std() + self.true1.std())
+        l -= spread * 0.5
+        h += spread * 0.5
+        grid = np.linspace(l,h,n)
+        return n, (l,h), grid
+
+
+    def draw_from_true(self, cls, n=20):
+        if cls == 0:
+            return self.true0.rvs(size=n)
+        else:
+            return self.true1.rvs(size=n)
+
+    def true_densities(self, line):
+        return (self.true0.logpdf(line), self.true1.logpdf(line))
+
+    def calc_densities(self, line):
+        fx0 = self.dist0.logpdf(line, self.gamma0, self.delta0, loc=self.mu0, scale=self.sigma0)
+        fx1 = self.dist1.logpdf(line, self.gamma1, self.delta1, loc=self.mu1, scale=self.sigma1)
         return (fx0, fx1)
 
     def init_db(self, db, size):
@@ -247,38 +275,6 @@ class Johnson():
         root.objfxn.delta0.append((self.delta0,))
         root.objfxn.delta1.append((self.delta1,))
         root.objfxn.c.append((self.c,))
-
-    #def get_grid(self):
-        #samples = np.vstack((self.draw_from_true(0), self.draw_from_true(1)))
-        #n = 30
-        #lx,hx,ly,hy = np.vstack((samples.min(axis=0), samples.max(axis=0))).T.flatten()
-        #xspread, yspread = hx-lx, hy-ly
-        #lx -= xspread * 0.2
-        #hx += xspread * 0.2
-        #ly -= yspread * 0.2
-        #hy += yspread * 0.2
-        #gextent = (lx,hx,ly,hy)
-        #grid = np.dstack(np.meshgrid(
-                        #np.linspace(lx,hx,n),
-                        #np.linspace(ly,hy,n))).reshape(-1,2)
-        #return n, gextent, grid
-
-    #def calc_analytic(self, grid_n, grid):
-        ## Expectation of C from page 3 eq. 1 using beta conjugate prior
-        #ag = (self.fx0.logpdf(grid) - self.fx1.logpdf(grid) \
-                #+ log(self.Ec) - log(1-self.Ec)).reshape(grid_n,-1)
-        #afx0 = self.fx0.logpdf(grid).reshape(grid_n, -1)
-        #afx1 = self.fx1.logpdf(grid).reshape(grid_n, -1)
-        #return afx0, afx1, ag
-
-    def draw_from_true(self, cls, n=100):
-        if cls == 0:
-            mu = self.true['mu0']
-            sigma = self.true['sigma0']
-        return np.random.multivariate_normal(mu, sigma, n)
-        else:
-            mu = self.true['mu1']
-            sigma = self.true['sigma1']
 
 class Classification():
     def __init__(self):
@@ -377,11 +373,6 @@ class Classification():
         self.S1star = self.priorsigma1 + (self.n1-1)*sample1cov + self.nu1*self.n1/(self.nu1+self.nu1)\
                 * np.outer((sample1mean - self.priormu1), (sample1mean - self.priormu1))
                 
-
-        self.analytic = {'c': ,
-                        'mu0': self.mu0star,
-                        'mu1': self.mu1star,
-
         #### Now calculate effective class conditional densities from eq 55
         #### page 21
 
@@ -394,6 +385,11 @@ class Classification():
                 (self.nu1star+1)/(self.kappa1star-self.D+1)/self.nu1star * self.S1star, 
                 self.kappa1star - self.D + 1)
         self.Ec = (self.n0 + self.alpha0) / (self.n + self.alpha0 + self.alpha1)
+
+        self.analytic = {'c': self.Ec,
+                        'mu0': self.mu0star,
+                        'mu1': self.mu1star}
+
 
     def propose(self):
         self.oldmu0 = self.mu0.copy()
@@ -644,3 +640,28 @@ def plot_ellipse(splot, mean, cov, color):
     ell.set_clip_box(splot.bbox)
     ell.set_alpha(0.3)
     splot.add_artist(ell)
+
+if __name__ == '__main__':
+    j = Johnson()
+    for i in range(20):
+        j.propose()
+        print j.energy()
+
+    n, (l,h), line = j.get_grid()
+    print l,h
+    print line
+    lp0,lp1 = j.calc_densities(line)
+    tlp0,tlp1 = j.true_densities(line)
+    p.subplot(2,1,1)
+    p.plot(line, lp0, 'g', line, tlp0, 'g--')
+    p.plot(line, lp1, 'm', line, tlp1, 'm--')
+    p.plot(j.data[j.mask0], np.zeros_like(j.data[j.mask0]), 'go')
+    p.plot(j.data[j.mask1], np.zeros_like(j.data[j.mask1]), 'mo')
+
+    p.subplot(2,1,2)
+    p.plot(line, np.exp(lp0), 'g', line, np.exp(tlp0), 'g--')
+    p.plot(line, np.exp(lp1), 'm', line, np.exp(tlp1), 'm--')
+    p.plot(j.data[j.mask0], np.zeros_like(j.data[j.mask0]), 'go')
+    p.plot(j.data[j.mask1], np.zeros_like(j.data[j.mask1]), 'mo')
+    p.show()
+
