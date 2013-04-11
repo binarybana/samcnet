@@ -70,7 +70,8 @@ def logp_normal(x, mu, sigma, nu=1.0):
 
 class Johnson():
     def __init__(self, **kw):
-        seed = np.random.randint(10**6)
+        #seed = np.random.randint(10**6)
+        seed = 10000
         print "Seed is %d" % seed
         np.random.seed(seed)
 
@@ -79,8 +80,8 @@ class Johnson():
                 1:{'mu':0.0, 'sigma':0.7413, 'gamma':1.2, 'delta':0.9},
                 'type0':'SU',
                 'type1':'SU',
-                'n':30,
-                'c':0.8}
+                'n':100,
+                'c':0.5}
 
         for k in kw:
             if type(params[k]) == dict:
@@ -128,9 +129,8 @@ class Johnson():
         self.olddelta1 = None
         self.oldc = None
 
-        self.propmu = 0.2
-        self.propdelta = 0.2
-        self.propgamma = 0.2
+        # Proposal amounts for      c    mu  sigma gamma delta
+        self.propscales = np.array([0.1, 0.1, 0.1, 0.1, 0.1]) 
 
         ### Prior for c ###
         self.alpha0 = 1.0
@@ -162,21 +162,25 @@ class Johnson():
             self.init_params()
         else:
 
-            add = np.random.randn()*0.1
-            self.c += add
+            rands = (np.random.rand(9) - 0.5) * self.propscales
+            self.c += rands[0]
             if self.c >= 1.0:
                 self.c -= self.c - 1 + 0.01
             elif self.c <= 0.0:
                 self.c = abs(self.c) + 0.01
 
-            self.mu0 += (np.random.rand()-0.5)*self.propmu
-            self.mu1 += (np.random.rand()-0.5)*self.propmu
-            self.sigma0 = di.invgamma.rvs(2)
-            self.sigma1 = di.invgamma.rvs(2)
-            self.gamma0 += (np.random.rand()-0.5)*self.propgamma
-            self.gamma1 += (np.random.rand()-0.5)*self.propgamma
-            self.delta0 += (np.random.rand()-0.5)*self.propdelta
-            self.delta1 += (np.random.rand()-0.5)*self.propdelta
+            self.mu0 += rands[1]
+            self.mu1 += rands[2]
+            self.sigma0 += rands[3]
+            if self.sigma0 <= 0.0:
+                self.sigma0 = 0.1
+            self.sigma1 = rands[4]
+            if self.sigma1 <= 0.0:
+                self.sigma1 = 0.1
+            self.gamma0 += rands[5]
+            self.gamma1 += rands[6]
+            self.delta0 += rands[7]
+            self.delta1 += rands[8]
 
             # TODO Probably need to check if this is actually
             # a valid set of parameters
