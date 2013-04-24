@@ -27,8 +27,8 @@ def plotHist(s):
     p.ylabel('Count')
     p.xlabel('Energy')
 
-    energies = s.db['energies']
-    thetas = s.db['thetas']
+    energies = s.db.root.samc.energy_trace.read()
+    thetas = s.db.root.samc.theta_trace.read()
 
     p.subplot(rows, cols, 3)
     p.plot(np.arange(s.burn, energies.shape[0]+s.burn), energies, 'k.')
@@ -54,8 +54,8 @@ def plotHist(s):
     p.ylabel('Amount of weight at this value')
 
 def plotScatter(s):
-    energies = s.db['energies']
-    thetas = s.db['thetas']
+    energies = s.db.root.samc.energy_trace.read()
+    thetas = s.db.root.samc.theta_trace.read()
 
     p.figure()
     p.plot(energies, thetas, 'k.', alpha=0.7)

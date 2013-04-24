@@ -70,8 +70,8 @@ def logp_normal(x, mu, sigma, nu=1.0):
 
 class Johnson():
     def __init__(self, **kw):
-        #seed = np.random.randint(10**6)
-        seed = 10000
+        seed = np.random.randint(10**6)
+        #seed = 10000
         print "Seed is %d" % seed
         np.random.seed(seed)
 
@@ -129,8 +129,9 @@ class Johnson():
         self.olddelta1 = None
         self.oldc = None
 
-        # Proposal amounts for      c    mu  sigma gamma delta
-        self.propscales = np.array([0.1, 0.1, 0.1, 0.1, 0.1]) 
+        # Proposal amounts for      c    mu0  mu1  0 sig1 gamma0 gam1 del0 del1
+        self.propscales = np.array([0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]) 
+        #self.propscales = np.array([0.0, 0.1, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]) 
 
         ### Prior for c ###
         self.alpha0 = 1.0
@@ -139,13 +140,13 @@ class Johnson():
     def init_params(self):
         self.mu0 = self.data[self.mask0].mean()
         self.mu1 = self.data[self.mask1].mean()
-        self.sigma0 = di.invgamma.rvs(2)
-        self.sigma1 = di.invgamma.rvs(2)
-        self.gamma0 = 0.0
-        self.gamma1 = 0.0
-        self.delta0 = 2.0
-        self.delta1 = 2.0
-        self.c = np.random.rand()
+        self.sigma0 = 1.0
+        self.sigma1 = 1.0
+        self.gamma0 = -0.5
+        self.gamma1 = 0.5
+        self.delta0 = 1.0
+        self.delta1 = 1.0
+        self.c = 0.5
 
     def propose(self):
         self.oldmu0 = self.mu0

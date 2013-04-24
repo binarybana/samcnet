@@ -18,8 +18,9 @@ if 'WORKHASH' in os.environ:
         sys.exit("ERROR in worker: Need REDIS environment variable defined.")
 
 c = lori.Johnson()
-s = samc.SAMCRun(c, burn=10, stepscale=10, refden=0, thin=10)
-s.sample(1000)
+#c = lori.Classification()
+s = samc.SAMCRun(c, burn=1e3, stepscale=10000, refden=2, thin=10)
+s.sample(2e4, temperature=10)
 
 s.compute_means()
 

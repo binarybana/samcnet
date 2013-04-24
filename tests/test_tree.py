@@ -2,7 +2,6 @@ import sys, os, random
 import numpy as np
 import scipy as sp
 import networkx as nx
-import json as js
 import tables as t
 import zlib
 
