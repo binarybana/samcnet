@@ -7,7 +7,7 @@ import zlib
 
 from samcnet.samc import SAMCRun
 from samcnet.bayesnet import BayesNet
-from samcnet.bayesnetcpd import BayesNetCPD
+from samcnet.bayesnetcpd import BayesNetCPD, BayesNetSampler
 from samcnet.generator import *
 from samcnet import utils
 
@@ -44,9 +44,12 @@ print joint
 random.seed()
 np.random.seed()
 
-ground = BayesNetCPD(states, data, template, ground=joint, priorweight=priorweight, gold=True)
+ground = BayesNetCPD(states, data)
+ground.set_cpds(joint)
 
-b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight,verbose=True)
+obj = BayesNetCPD(states, data)
+
+b = BayesNetSampler(obj, template, ground, priorweight)
 s = SAMCRun(b,burn,stepscale,refden,thin,verbose=True)
 s.sample(iters, temperature)
 

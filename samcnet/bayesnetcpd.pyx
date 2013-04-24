@@ -14,8 +14,9 @@ cimport numpy as np
 
 import scipy.stats as st
 
-from collections import Counter, defaultdict
+from collections import defaultdict
 from math import lgamma, log
+import networkx as nx
 import tables as t
 
 cdef extern from "utils.h":
@@ -25,80 +26,22 @@ cdef extern from "utils.h":
 
 DEF DEBUG=0
 
-cdef class BayesNetCPD(BayesNet):
-    """To initialize a BayesNetCPD we need:
-    
-    ==Required==
-    nodes: Node names.
-    states: Arities.
-    data: For -logP calculations.
-
-    ==Optional prior information==
-    priorweight: A float used in the -logP calculations.
-    template: An adjacency matrix over the nodes with float values from [0,1]
-
-    With all of these parameters, the network will be initialized with no
-    interconnections and all nodes assigned a uniform probability over their 
-    arities.
-
-    """
-    def __cinit__(self, *args, **kwargs):
-        self.memo_entropy = 0.0
-        self.dirty = True
-    
-    def __init__(self, states, data, template=None, ground=None, priorweight=1.0, gold=False,
-            verbose=False):
-        cdef int i, j, k, l
-        cdef Factor tempfactor
-        cdef VarSet tempvarset, parset
-        cdef map[Var, size_t] mapstate
-        nodes = np.arange(states.shape[0])
-        BayesNet.__init__(self, states, data, template, ground, priorweight,verbose)
-
-        self.logqfactor = 0.0
-        if data.size:
-            for i in range(data.shape[0]): 
-                self.pdata.push_back(vector[ulong]())
-                for j in range(data.shape[1]):
-                    self.pdata[i].push_back(data[i,j])
-
-        cdef vector[Factor] facvector
-        if not gold:
-            for name,arity in zip(nodes,states):
-                self.pnodes.push_back(Var(name, arity))
-                facvector.push_back(Factor(self.pnodes.back()))
-        else: 
-            totuple = []
-            for name,arity in zip(nodes,states):
-                self.pnodes.push_back(Var(name, arity))
-            for i, dist in ground.dists.iteritems():
-                tempvarset = VarSet(self.pnodes[i])
-                parset = VarSet()
-                for j in dist.sorted_parent_names:
-                    tempvarset.insert(self.pnodes[j])
-                    parset.insert(self.pnodes[j])
-                
-                tempfactor = Factor(tempvarset)
-                for j in range(dai.BigInt_size_t(parset.nrStates())):
-                    mapstate = calcState(parset, j)
-                    totuple = []
-                    for l in dist.sorted_parent_names:
-                        totuple.append(mapstate[self.pnodes[l]])
-                    for k in range(states[i]):
-                        mapstate[self.pnodes[i]] = k
-                        if k == states[i]-1:
-                            tempfactor.set(calcLinearState(tempvarset, mapstate), 
-                                    1 - np.sum(ground.dists[i].fastp(tuple(totuple))))
-                        else:
-                            tempfactor.set(calcLinearState(tempvarset, mapstate), 
-                                    ground.dists[i].fastp(tuple(totuple))[k])
-                facvector.push_back(tempfactor)
-
-        self.fg = FactorGraph(facvector)
-
+cdef class BayesNetSampler:
+    cdef public:
+        object bayesnet, ntemplate, ground
+        double priorweight
+    def __init__(self, bayesnet, ntemplate=None, ground=None, priorweight=1.0, verbose=False):
+        self.bayesnet = bayesnet
+        if type(ntemplate) == np.array:
+            self.ntemplate = ntemplate
+        elif type(ntemplate) == nx.DiGraph:
+            self.ntemplate = np.array(nx.to_numpy_matrix(ntemplate), dtype=np.int32)
+        self.ground = ground
+        self.priorweight = priorweight
+        
     def copy(self):
         """ Create a copy of myself for suitable use later """
-        return (self.mat.copy(), self.x.copy(), 0 )# self.fg.clone()) # need to wrap this
+        return (self.mat.copy(), self.x.copy())
 
     def init_db(self, db, size):
         """ Takes a Pytables Group object (group) and the total number of samples expected and
@@ -129,6 +72,123 @@ cdef class BayesNetCPD(BayesNet):
             root.objfxn.kld.append((self.ground.kld(self),))
             root.objfxn.edge_distance.append((self.global_edge_presence(),))
 
+    def energy(self):
+        cdef double accum = self.bayesnet.energy()
+        cdef double priordiff = 0.0
+        for i in range(self.bayesnet.node_num):
+            for j in range(self.bayesnet.node_num):
+                if(j!=i):
+                    priordiff += abs(self.bayesnet.mat[j,i] - self.ntemplate[self.bayesnet.x[j],self.bayesnet.x[i]]) # TODO FIX TEMPLATE
+        accum += (priordiff)*self.priorweight
+        return accum
+
+    def propose(self):
+        self.bayesnet.mutate()
+
+    def reject(self):
+        self.bayesnet.revert()
+
+cdef class BayesNetCPD:
+    """To initialize a BayesNetCPD we need:
+    
+    ==Required==
+    nodes: Node names.
+    states: Arities.
+    data: For -logP calculations.
+
+    ==Optional prior information==
+    priorweight: A float used in the -logP calculations.
+    template: An adjacency matrix over the nodes with float values from [0,1]
+
+    With all of these parameters, the network will be initialized with no
+    interconnections and all nodes assigned a uniform probability over their 
+    arities.
+
+    cdef public:
+        # From Bayesnet
+        object states,data,x,mat,changelist,fvalue
+        object oldmat, oldx
+        int limparent, node_num, changelength
+
+        double logqfactor # For RJMCMC weighting of the acceptance probability
+        double memo_entropy
+        object dirty
+    cdef:
+        vector[Var] pnodes
+        vector[vector[ulong]] pdata
+        FactorGraph fg
+        JTree jtree
+
+    """
+    def __cinit__(self, *args, **kwargs):
+        self.memo_entropy = 0.0
+        self.dirty = True
+    
+    def __init__(self, states, data=None):
+        cdef int i, j 
+
+        self.logqfactor = 0.0
+        self.data = data
+        self.states = states
+        self.node_num = states.shape[0]
+        self.limparent = 3
+        self.x = np.arange(self.node_num, dtype=np.int32)
+        self.mat = np.eye(self.node_num, dtype=np.int32)
+        self.fvalue = np.zeros((self.node_num,), dtype=np.double)
+        np.random.shuffle(self.x) # We're going to make this a 0-9 permutation
+        self.changelist = self.x.copy()
+
+        if data != None and data.size:
+            for i in range(data.shape[0]): 
+                self.pdata.push_back(vector[ulong]())
+                for j in range(data.shape[1]):
+                    self.pdata[i].push_back(data[i,j])
+
+        cdef vector[Factor] facvector
+        for name,arity in zip(np.arange(self.node_num),states):
+            self.pnodes.push_back(Var(name, arity))
+            facvector.push_back(Factor(self.pnodes.back()))
+
+        self.fg = FactorGraph(facvector)
+
+    def set_cpds(self, ground):
+        self.dirty = True
+
+        self.pnodes.clear()
+        cdef vector[Factor] facvector
+        cdef map[Var, size_t] mapstate
+        totuple = []
+        cdef int i, j, k, l
+        cdef Factor tempfactor
+        cdef VarSet tempvarset, parset
+
+        for name,arity in zip(np.arange(self.node_num),self.states):
+            self.pnodes.push_back(Var(name, arity))
+        for i, dist in ground.dists.iteritems():
+            tempvarset = VarSet(self.pnodes[i])
+            parset = VarSet()
+            for j in dist.sorted_parent_names:
+                tempvarset.insert(self.pnodes[j])
+                parset.insert(self.pnodes[j])
+            
+            tempfactor = Factor(tempvarset)
+            for j in range(dai.BigInt_size_t(parset.nrStates())):
+                mapstate = calcState(parset, j)
+                totuple = []
+                for l in dist.sorted_parent_names:
+                    totuple.append(mapstate[self.pnodes[l]])
+                for k in range(self.states[i]):
+                    mapstate[self.pnodes[i]] = k
+                    if k == self.states[i]-1:
+                        tempfactor.set(calcLinearState(tempvarset, mapstate), 
+                                1 - np.sum(ground.dists[i].fastp(tuple(totuple))))
+                    else:
+                        tempfactor.set(calcLinearState(tempvarset, mapstate), 
+                                ground.dists[i].fastp(tuple(totuple))[k])
+            facvector.push_back(tempfactor)
+
+        self.fg = FactorGraph(facvector)
+
     #@cython.boundscheck(False)
     def energy(self):
         """ 
@@ -138,15 +198,12 @@ cdef class BayesNetCPD(BayesNet):
             print "Energy top"
         cdef np.ndarray[np.int32_t, ndim=1, mode="c"] x = \
                 self.x
-        cdef np.ndarray[np.double_t, ndim=2, mode="c"] ntemplate = \
-                self.ntemplate
         cdef np.ndarray[np.int32_t, ndim=2, mode="c"] mat = \
                 self.mat
 
         cdef int i,j,node,data,index,arity,parstate,state
-        cdef double sum, priordiff, accum, accumgold
+        cdef double sum, accum
         accum = 0
-        accumgold = 0
 
         # Limit the number of parents
         for i in range(self.changelength):
@@ -185,15 +242,9 @@ cdef class BayesNetCPD(BayesNet):
 
         IF DEBUG:
             print "energy bottom. energy: %f" % accum
-            print "energy: marginal likelihood %f; struct prior %f; qfactor %f" % \
-                    (sum, priordiff*self.prior_gamma, self.logqfactor)
+            print "energy: marginal likelihood %f; qfactor %f" % \
+                    (sum, self.logqfactor)
 
-        priordiff = 0.0
-        for i in range(self.node_num):
-            for j in range(self.node_num):
-                if(j!=i):
-                    priordiff += abs(mat[j,i] - ntemplate[x[j],x[i]])
-        sum += (priordiff)*self.prior_gamma
         sum -= self.logqfactor #TODO Check this negative sign
 
         return sum
@@ -304,8 +355,8 @@ cdef class BayesNetCPD(BayesNet):
         # Cannot put dirty to false here because our JTree is not up to date.
         return -accum
 
-    def reject(self):
-        """ Revert graph, mat, x, fvalue, changelist, and changelength. """
+    def revert(self):
+        """ Revert mat, x, fvalue, changelist, and changelength. """
         IF DEBUG:
             print("REJECTING")
         self.mat = self.oldmat
@@ -320,7 +371,7 @@ cdef class BayesNetCPD(BayesNet):
         # If I really wanted to be safe I would set changelngeth=10 and maybe
         # changelist
 
-    def propose(self):
+    def mutate(self):
         """ 'Propose' a new network structure by backing up the old one and then 
         changing the current one. """
 
@@ -557,3 +608,29 @@ cdef class BayesNetCPD(BayesNet):
     def __repr__(self):
         return (crepr(self.fg))
 
+if __name__ == '__main__':
+    #def __init__(self, states, data, ground=None, priorweight=1.0, gold=False,
+            #verbose=False):
+    #empty = BayesNetCPD(3)
+    #assert empty.entropy() == 3.0
+
+    #connected = TreeNet(3)
+    #connected.add_edge(0,1,0.0,0.0)
+    #connected.add_edge(1,2,0.0,0.0)
+    #assert connected.entropy() == 1.0
+    #assert connected.kld(empty) == 2.0
+
+    np.random.seed(1234)
+    #con = TreeNet(4)
+    #rcon = TreeNet(4)
+    #for i in range(1000):
+        #kl1 = rcon.kld(con)
+        #kl2 = con.kld(rcon)
+        #assert (kl1 >= 0.0)
+        #assert (kl2 >= 0.0)
+        #rcon.propose()
+        #con.propose()
+
+    #t = TreeNet(6)
+    #for i in range(500):
+        #t.propose()

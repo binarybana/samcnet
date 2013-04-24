@@ -2,7 +2,7 @@ cimport numpy as np
 
 cdef class BayesNet:
     cdef public:
-        object nodes,states,data,graph,x,mat,fvalue,changelist,table
+        object nodes,states,data,graph,x,mat,fvalue,changelist
         object oldmat, oldx, oldfvalue
         object gtemplate, ntemplate, ground
         object verbose

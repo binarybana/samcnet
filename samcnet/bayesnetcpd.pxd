@@ -2,11 +2,7 @@ from bayesnet cimport BayesNet
 from dai_bind cimport FactorGraph, Var, VarSet, JTree
 from libcpp.vector cimport vector
 
-cdef class MemoCounter:
-    cdef public:
-        object memo_table, data
-
-cdef class BayesNetCPD(BayesNet):
+cdef class BayesNetCPD:
     """To initialize a BayesNetCPD we need:
     
     ==Required==
@@ -24,10 +20,14 @@ cdef class BayesNetCPD(BayesNet):
 
     """
     cdef public:
-      #object memo_table
-      double logqfactor # For RJMCMC weighting of the acceptance probability
-      double memo_entropy
-      object dirty
+        # From Bayesnet
+        object states,data,x,mat,changelist,fvalue
+        object oldmat, oldx
+        int limparent, node_num, changelength
+
+        double logqfactor # For RJMCMC weighting of the acceptance probability
+        double memo_entropy
+        object dirty
     cdef:
         vector[Var] pnodes
         vector[vector[ulong]] pdata

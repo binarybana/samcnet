@@ -69,17 +69,6 @@ cdef class BayesNet:
         self.cmat = npy2c_int(self.mat)
         self.cdata = npy2c_int(self.data)
 
-    #def __del__(self):
-        #""" This should not be expected to run (google python's behavior
-        #in __del__ to see why). But we really don't need it to. """
-        #self.table.flush()
-
-    #def __dealloc__(self):
-        #""" Should deallocate self.cmat here, but since it is tied to 
-        #c.mat, I don't really want to mess with it right now.
-        #"""
-        #pass
-
     def global_edge_presence(self):
         if self.ground == None:
             return np.nan
