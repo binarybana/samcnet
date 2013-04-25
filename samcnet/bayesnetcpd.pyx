@@ -27,11 +27,19 @@ cdef extern from "utils.h":
 DEF DEBUG=0
 
 cdef class BayesNetSampler:
+    """ 
+    == Optional prior information ==
+
+    priorweight: A float used in the -logP calculations.
+    template: An adjacency matrix over the nodes with float values from [0,1]
+
+    """
     cdef public:
-        object bayesnet, ntemplate, ground
+        object bayesnet, ntemplate, ground, verbose
         double priorweight
     def __init__(self, bayesnet, ntemplate=None, ground=None, priorweight=1.0, verbose=False):
         self.bayesnet = bayesnet
+        self.verbose = verbose
         if type(ntemplate) == np.array:
             self.ntemplate = ntemplate
         elif type(ntemplate) == nx.DiGraph:
@@ -41,7 +49,7 @@ cdef class BayesNetSampler:
         
     def copy(self):
         """ Create a copy of myself for suitable use later """
-        return (self.mat.copy(), self.x.copy())
+        return (self.bayesnet.mat.copy(), self.bayesnet.x.copy())
 
     def init_db(self, db, size):
         """ Takes a Pytables Group object (group) and the total number of samples expected and
@@ -64,21 +72,22 @@ cdef class BayesNetSampler:
         Pytables db
         """ 
         root = db.root.object
-        root.objfxn.entropy.append((self.entropy(),))
+        root.objfxn.entropy.append((self.bayesnet.entropy(),))
         if self.verbose:
-            root.samples.mat.append((self.mat,))
-            root.samples.x.append((self.x,))
+            root.samples.mat.append((self.bayesnet.mat,))
+            root.samples.x.append((self.bayesnet.x,))
         if self.ground:
-            root.objfxn.kld.append((self.ground.kld(self),))
-            root.objfxn.edge_distance.append((self.global_edge_presence(),))
+            root.objfxn.kld.append((self.ground.kld(self.bayesnet),))
+            root.objfxn.edge_distance.append((self.bayesnet.global_edge_presence(self.ground),))
 
     def energy(self):
-        cdef double accum = self.bayesnet.energy()
+        cdef double accum = self.bayesnet.energy(self.priorweight)
         cdef double priordiff = 0.0
         for i in range(self.bayesnet.node_num):
             for j in range(self.bayesnet.node_num):
                 if(j!=i):
-                    priordiff += abs(self.bayesnet.mat[j,i] - self.ntemplate[self.bayesnet.x[j],self.bayesnet.x[i]]) # TODO FIX TEMPLATE
+                    priordiff += abs(self.bayesnet.mat[j,i] \
+                            - self.ntemplate[self.bayesnet.x[j],self.bayesnet.x[i]]) 
         accum += (priordiff)*self.priorweight
         return accum
 
@@ -92,33 +101,12 @@ cdef class BayesNetCPD:
     """To initialize a BayesNetCPD we need:
     
     ==Required==
-    nodes: Node names.
     states: Arities.
     data: For -logP calculations.
-
-    ==Optional prior information==
-    priorweight: A float used in the -logP calculations.
-    template: An adjacency matrix over the nodes with float values from [0,1]
 
     With all of these parameters, the network will be initialized with no
     interconnections and all nodes assigned a uniform probability over their 
     arities.
-
-    cdef public:
-        # From Bayesnet
-        object states,data,x,mat,changelist,fvalue
-        object oldmat, oldx
-        int limparent, node_num, changelength
-
-        double logqfactor # For RJMCMC weighting of the acceptance probability
-        double memo_entropy
-        object dirty
-    cdef:
-        vector[Var] pnodes
-        vector[vector[ulong]] pdata
-        FactorGraph fg
-        JTree jtree
-
     """
     def __cinit__(self, *args, **kwargs):
         self.memo_entropy = 0.0
@@ -189,8 +177,14 @@ cdef class BayesNetCPD:
 
         self.fg = FactorGraph(facvector)
 
+    def global_edge_presence(self, other):
+        s = self.x.argsort()
+        sg = other.x.argsort()
+        ordmat = self.mat[s].T[s].T
+        return np.abs(other.mat[sg].T[sg].T - ordmat).sum() # TODO report TN, TP, FN, FP
+
     #@cython.boundscheck(False)
-    def energy(self):
+    def energy(self, double prior_alpha):
         """ 
         Calculate the -log probability. 
         """
@@ -226,8 +220,8 @@ cdef class BayesNetCPD:
             node = x[self.changelist[i]]
             arity = self.pnodes[node].states()
             numparstates = self.fg.factor(node).nrStates()/arity
-            alpha_ijk = self.prior_alpha/numparstates/arity
-            alpha_ik = self.prior_alpha/numparstates
+            alpha_ijk = prior_alpha/numparstates/arity
+            alpha_ik = prior_alpha/numparstates
             for parstate in range(numparstates):
                 accum -= lgamma(alpha_ijk) * arity
                 accum += lgamma(alpha_ik)
@@ -608,11 +602,11 @@ cdef class BayesNetCPD:
     def __repr__(self):
         return (crepr(self.fg))
 
-if __name__ == '__main__':
-    #def __init__(self, states, data, ground=None, priorweight=1.0, gold=False,
-            #verbose=False):
-    #empty = BayesNetCPD(3)
-    #assert empty.entropy() == 3.0
+def test():
+    empty = BayesNetCPD(np.array([2,2,2]))
+    print empty.entropy() 
+    print empty.naive_entropy() 
+    print empty
 
     #connected = TreeNet(3)
     #connected.add_edge(0,1,0.0,0.0)
@@ -620,7 +614,7 @@ if __name__ == '__main__':
     #assert connected.entropy() == 1.0
     #assert connected.kld(empty) == 2.0
 
-    np.random.seed(1234)
+    #np.random.seed(1234)
     #con = TreeNet(4)
     #rcon = TreeNet(4)
     #for i in range(1000):

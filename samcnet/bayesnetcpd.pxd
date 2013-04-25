@@ -22,7 +22,7 @@ cdef class BayesNetCPD:
     cdef public:
         # From Bayesnet
         object states,data,x,mat,changelist,fvalue
-        object oldmat, oldx
+        object oldmat, oldx, oldfvalue
         int limparent, node_num, changelength
 
         double logqfactor # For RJMCMC weighting of the acceptance probability
