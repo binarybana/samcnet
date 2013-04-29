@@ -119,7 +119,7 @@ cdef class BayesNetCPD:
         self.data = data
         self.states = states
         self.node_num = states.shape[0]
-        self.limparent = 3
+        self.limparent = 1
         self.x = np.arange(self.node_num, dtype=np.int32)
         self.mat = np.eye(self.node_num, dtype=np.int32)
         self.fvalue = np.zeros((self.node_num,), dtype=np.double)
@@ -291,7 +291,7 @@ cdef class BayesNetCPD:
                     # Or does index == other.convert_separate(i, state,
                     # parstate)?
                     prob = joint[index]/marginal[parstate]
-                    subaccum += prob * log(cpd_lookup)
+                    subaccum += prob * log(cpd_lookup,2)
                 accum += marginal[parstate] * subaccum
         return -self.memo_entropy - accum
 
@@ -316,7 +316,7 @@ cdef class BayesNetCPD:
                 accumsum = 0.0
                 for state in range(arity):
                     temp = self.fg.factor(i)[self.convert_separate(i, state, parstate)]
-                    accumsum -= temp * log(temp)
+                    accumsum -= 0.0 if temp == 0.0 else temp * log(temp,2)
                 accum += marginal[parstate] * accumsum
 
         self.dirty = False
@@ -326,7 +326,7 @@ cdef class BayesNetCPD:
     def naive_entropy(self):
         cdef:
             int numstates,i
-            double temp,accumsum,accumprod,accum
+            double accumprod,accum
             map[Var, size_t] statemap
             VarSet allvars = VarSet(self.pnodes.begin(), self.pnodes.end(), self.pnodes.size())
 
@@ -337,14 +337,11 @@ cdef class BayesNetCPD:
             numstates *= self.pnodes[i].states()
 
         for i in range(numstates):
-            accumsum = 0.0
             accumprod = 1.0
             statemap = calcState(allvars, i)
             for j in range(self.fg.nrFactors()):
-                temp = self.fg.factor(j)[calcLinearState(self.fg.factor(j).vars(), statemap)]
-                accumsum += log(temp)
-                accumprod *= temp
-            accum += accumsum * accumprod
+                accumprod *= self.fg.factor(j)[calcLinearState(self.fg.factor(j).vars(), statemap)]
+            accum += 0.0 if accumprod == 0.0 else accumprod * log(accumprod,2)
 
         # Cannot put dirty to false here because our JTree is not up to date.
         return -accum
@@ -394,20 +391,8 @@ cdef class BayesNetCPD:
         if scheme==1: # temporal order change 
             k = np.random.randint(self.node_num-1)
             
-            #print "k: %d" % k
-            #print np.arange(self.node_num)
-            #print self.x
-            #print ""
-            #print self.mat
-            #s = self.x.argsort()
-            #print ""
-            #print self.mat[s].T[s].T
-            
             # Change parameters:
             self.logqfactor = 0.0
-            IF DEBUG:
-                print "swapping k=%d and k+1=%d" % (x[k],x[k+1])
-
             #For any parents of node k not shared with k+1 (and vice versa):
             for i in range(0, k):
                 if self.mat[i,k] and not self.mat[i,k+1]:
@@ -442,30 +427,23 @@ cdef class BayesNetCPD:
                 
         if scheme==2: # skeletal change
 
-            i = np.random.randint(self.node_num)
-            j = np.random.randint(self.node_num)
-            while i==j:
+            underparlimit = True
+            while underparlimit:
+                i = np.random.randint(self.node_num)
                 j = np.random.randint(self.node_num)
-            if i>j:
-                i,j = j,i
+                while i==j:
+                    j = np.random.randint(self.node_num)
+                if i>j:
+                    i,j = j,i
 
-            IF DEBUG:
-                print "toggling edge (i,j)=(%d,%d)" % (x[i],x[j])
-            #print np.arange(self.node_num)
-            #print self.x
-            #print ""
-            #print self.mat
-            #s = self.x.argsort()
-            #print ""
-            #print self.mat[s].T[s].T
+                edgedel = self.mat[i,j]
+                self.mat[i,j] = 1-self.mat[i,j]
+                underparlimit = self.mat[:,j].sum() > (self.limparent+1) 
+                #+1 because of unitary diagonal
 
-            edgedel = self.mat[i,j]
-            self.mat[i,j] = 1-self.mat[i,j]
             self.changelength=1
             self.changelist[0]=j
 
-            # Change parameters:
-            #print "adding edge: base node %d, parent node %d" % (self.nodes[self.x[j]], self.nodes[self.x[i]])
             if edgedel:
                 dellist[x[j]].append(x[i])
             else:
@@ -485,7 +463,7 @@ cdef class BayesNetCPD:
 
         if scheme != 3:
             for node in set(addlist.keys() + dellist.keys()):
-                self.logqfactor += self.adjust_factor(node, addlist[node], dellist[node])
+                self.logqfactor += self.adjust_factor(node, addlist[node], dellist[node],True)
 
         IF DEBUG:
             s = self.x.argsort()
@@ -499,8 +477,17 @@ cdef class BayesNetCPD:
             print "#############################################"
 
         return scheme
+
+    def set_factor(self, node, newfac):
+        cdef int i
+        cdef Factor fac = self.fg.factor(node)
+        assert len(newfac) == fac.nrStates()
+
+        for i in range(fac.nrStates()):
+            fac.set(i, newfac[i])
+        self.fg.setFactor(node, fac)
     
-    def adjust_factor(self, int node, object addlist, object dellist):
+    def adjust_factor(self, int node, object addlist, object dellist, object undo=False):
         """ Adjust the factor according to the add list and delete list 
         """
         cdef int s
@@ -523,7 +510,10 @@ cdef class BayesNetCPD:
             newval = oldfac.get(calcLinearState(oldvars, calcState(newvars, s)))
             newfac.set(s, newval) 
 
-        self.fg.setFactor(node, newfac, True)
+        if undo: #For some reason Cython does not seem to be able to pass False into setFactor
+            self.fg.setFactor(node, newfac, True)
+        else:
+            self.fg.setFactor(node, newfac)
         
         IF DEBUG:
             print "## Adjusted factors"
@@ -604,15 +594,17 @@ cdef class BayesNetCPD:
 
 def test():
     empty = BayesNetCPD(np.array([2,2,2]))
-    print empty.entropy() 
-    print empty.naive_entropy() 
-    print empty
+    assert empty.entropy() == 3.0
+    assert empty.naive_entropy() == 3.0
 
-    #connected = TreeNet(3)
-    #connected.add_edge(0,1,0.0,0.0)
-    #connected.add_edge(1,2,0.0,0.0)
-    #assert connected.entropy() == 1.0
-    #assert connected.kld(empty) == 2.0
+    connected = BayesNetCPD(np.array([2,2,2]))
+    connected.adjust_factor(0,[1],[])
+    connected.set_factor(0, [0.0,1.0,0.0,1.0])
+    connected.adjust_factor(1,[2],[])
+    connected.set_factor(1, [0.0,1.0,0.0,1.0])
+
+    assert connected.entropy() == 1.0
+    assert connected.kld(empty) == 2.0
 
     #np.random.seed(1234)
     #con = TreeNet(4)
@@ -625,6 +617,8 @@ def test():
         #rcon.propose()
         #con.propose()
 
-    #t = TreeNet(6)
-    #for i in range(500):
-        #t.propose()
+    t = BayesNetCPD(np.ones(6,dtype=np.int32)*2)
+    for i in range(500):
+        t.mutate()
+
+    return empty, connected, t

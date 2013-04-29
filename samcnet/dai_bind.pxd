@@ -73,6 +73,7 @@ cdef extern from "dai/factorgraph.h" namespace "dai":
         double logScore(vector[long unsigned int] &)
         Factor factor(int)
         void setFactor(int, Factor, bool) except +
+        void setFactor(int, Factor) except +
         void clearBackups() except +
         void restoreFactors() except +
 
