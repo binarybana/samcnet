@@ -13,8 +13,7 @@ import samcnet.utils as utils
 
 try:
     from samcnet.samc import SAMCRun
-    from samcnet.bayesnet import BayesNet
-    from samcnet.bayesnetcpd import BayesNetCPD
+    from samcnet.bayesnetcpd import BayesNetCPD, BayesNetSampler
     from samcnet.generator import *
 except ImportError as e:
     sys.exit("Make sure LD_LIBRARY_PATH is set correctly and that the build"+\
@@ -30,7 +29,7 @@ if 'WORKHASH' in os.environ:
 ############### /SAMC Setup ############### 
 
 N = 4
-iters = 1e6
+iters = 1e4
 numdata = 20
 priorweight = 5
 numtemplate = 5
@@ -54,10 +53,13 @@ print joint
 random.seed()
 np.random.seed()
 
-ground = BayesNetCPD(states, data, template, ground=joint, priorweight=priorweight, gold=True)
+ground = BayesNetCPD(states, data)
+ground.set_cpds(joint)
 
-b = BayesNetCPD(states, data, template, ground=ground, priorweight=priorweight)
-s = SAMCRun(b,burn,stepscale,refden,thin)
+obj = BayesNetCPD(states, data)
+
+b = BayesNetSampler(obj, template, ground, priorweight)
+s = SAMCRun(b,burn,stepscale,refden,thin,verbose=True)
 s.sample(iters, temperature)
 
 res = []

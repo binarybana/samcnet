@@ -7,6 +7,25 @@ import pandas as pa
 import StringIO as si
 import tempfile
 
+from probability import CPD,fast_space_iterator,JointDistribution
+
+def graph_to_joint(graph):
+    joint = JointDistribution()
+    cpds = []
+    for node in graph.nodes():
+        marg = graph.node[node]['marginal']
+        eta = graph.node[node]['eta']
+        delta = graph.node[node]['delta']
+        if np.isnan(marg): # yes parents
+            params = {(0,):np.r_[1-eta], (1,):np.r_[delta]}
+            pars = {graph.predecessors(node)[0]:2}
+        else:
+            params = {():np.r_[marg]}
+            pars = {}
+        joint.add_distribution(CPD(node,2,params,pars))
+
+    return joint
+
 def getHost():
     return os.uname()[1].split('.')[0]
 
