@@ -30,14 +30,14 @@ cdef class BayesNetSampler:
     """ 
     == Optional prior information ==
 
-    priorweight: A float used in the -logP calculations.
+    prior_structural: A float used in the -logP calculations.
     template: An adjacency matrix over the nodes with float values from [0,1]
 
     """
     cdef public:
         object bayesnet, ntemplate, ground, verbose
-        double priorweight
-    def __init__(self, bayesnet, ntemplate=None, ground=None, priorweight=1.0, verbose=False):
+        double prior_structural
+    def __init__(self, bayesnet, ntemplate=None, ground=None, prior_structural=1.0, verbose=False):
         self.bayesnet = bayesnet
         self.verbose = verbose
         if type(ntemplate) == np.array:
@@ -45,7 +45,7 @@ cdef class BayesNetSampler:
         elif type(ntemplate) == nx.DiGraph:
             self.ntemplate = np.array(nx.to_numpy_matrix(ntemplate), dtype=np.int32)
         self.ground = ground
-        self.priorweight = priorweight
+        self.prior_structural = prior_structural
         
     def copy(self):
         """ Create a copy of myself for suitable use later """
@@ -81,21 +81,26 @@ cdef class BayesNetSampler:
             root.objfxn.edge_distance.append((self.bayesnet.global_edge_presence(self.ground),))
 
     def energy(self):
-        cdef double accum = self.bayesnet.energy(self.priorweight)
+        cdef np.ndarray[np.int32_t, ndim=1, mode="c"] x = \
+                self.bayesnet.x
+        cdef np.ndarray[np.int32_t, ndim=2, mode="c"] mat = \
+                self.bayesnet.mat
         cdef double priordiff = 0.0
+        ntemplate = self.ntemplate
         for i in range(self.bayesnet.node_num):
             for j in range(self.bayesnet.node_num):
                 if(j!=i):
-                    priordiff += abs(self.bayesnet.mat[j,i] \
-                            - self.ntemplate[self.bayesnet.x[j],self.bayesnet.x[i]]) 
-        accum += (priordiff)*self.priorweight
-        return accum
+                    priordiff += abs(mat[j,i] - ntemplate[x[j],x[i]]) 
+        return (priordiff)*self.prior_structural + self.bayesnet.energy()
 
     def propose(self):
         self.bayesnet.mutate()
 
     def reject(self):
         self.bayesnet.revert()
+
+    def info(self):
+        return self.bayesnet.num_edges()
 
 cdef class BayesNetCPD:
     """To initialize a BayesNetCPD we need:
@@ -125,6 +130,7 @@ cdef class BayesNetCPD:
         self.fvalue = np.zeros((self.node_num,), dtype=np.double)
         np.random.shuffle(self.x) # We're going to make this a 0-9 permutation
         self.changelist = self.x.copy()
+        self.changelength = self.node_num
 
         if data != None and data.size:
             for i in range(data.shape[0]): 
@@ -184,7 +190,7 @@ cdef class BayesNetCPD:
         return np.abs(other.mat[sg].T[sg].T - ordmat).sum() # TODO report TN, TP, FN, FP
 
     #@cython.boundscheck(False)
-    def energy(self, double prior_alpha):
+    def energy(self):
         """ 
         Calculate the -log probability. 
         """
@@ -215,20 +221,21 @@ cdef class BayesNetCPD:
                 index = self.convert(node, self.pdata[data])
                 counts[i][index] = counts[i][index] + 1
 
-        accum = 0
         for i in range(counts.size()):
+            accum = 0
             node = x[self.changelist[i]]
             arity = self.pnodes[node].states()
             numparstates = self.fg.factor(node).nrStates()/arity
-            alpha_ijk = prior_alpha/numparstates/arity
-            alpha_ik = prior_alpha/numparstates
+            fac = self.fg.factor(node)
+            #alpha_ijk = prior_alpha/numparstates/arity
+            #alpha_ik = prior_alpha/numparstates
             for parstate in range(numparstates):
-                accum -= lgamma(alpha_ijk) * arity
-                accum += lgamma(alpha_ik)
+                #accum -= lgamma(alpha_ijk) * arity
+                #accum += lgamma(alpha_ik)
                 for state in range(arity):
                     index = self.convert_separate(node, state, parstate)
-                    accum += log(self.fg.factor(node).get(index))*(counts[i][index] + alpha_ijk - 1)
-
+                    accum += log(fac.get(index))*(counts[i][index])
+                    #accum += log(self.fg.factor(node).get(index))*(counts[i][index] + alpha_ijk - 1)
 
             self.fvalue[node] = -1.0 * accum
 
@@ -256,6 +263,10 @@ cdef class BayesNetCPD:
         cdef map[Var, size_t] mapstate = calcState( vars/VarSet(self.pnodes[node]), parstate)
         mapstate[self.pnodes[node]] = state
         return calcLinearState(vars, mapstate)
+
+    def num_edges(self):
+        cdef int i
+        return (self.mat-np.eye(self.mat.shape[0],dtype=np.int)).sum()
 
     def kld(self, BayesNetCPD other):
         if self.dirty:

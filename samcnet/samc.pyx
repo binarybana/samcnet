@@ -52,6 +52,8 @@ cdef class SAMCRun:
             energy = self.obj.energy() 
             r = (oldenergy-energy) / 3.0 # Higher temperature for exploration
             if r > 0.0 or np.random.rand() < exp(r):
+                if self.verbose:
+                    print("Energy of {} accepted".format(energy))
                 if energy < low:
                     low = energy
                 elif energy > high:
@@ -198,7 +200,7 @@ cdef class SAMCRun:
             return i if i<self.grid else self.grid-1
 
     #@cython.boundscheck(False) # turn off bounds-checking for entire function
-    def sample(self, int iters, double temperature = 1.0):
+    def sample(self, int iters, double temperature = 1.0, object verbose = False):
         cdef int current_iter, accept, oldregion, newregion, i, nonempty, dbsize
         cdef double oldenergy, newenergy, r, un
         cdef np.ndarray[np.int32_t, ndim=1, mode="c"] locfreq = \
@@ -239,6 +241,12 @@ cdef class SAMCRun:
                 accept=1
             else:
                 accept=0;
+            if verbose and self.iteration % 100 == 0:
+                print(self.obj.info())
+                #print("""accept:{}, r:{:8.2g}, hist[old]:{:9.2g}, \
+                #hist[new]:{:9.2g}, olde:{:6.2g}, newe:{:6.2g} {}/{}""".format(
+                    #accept, r, hist[oldregion], hist[newregion], 
+                    #oldenergy, newenergy, oldregion,newregion))
 
             if accept == 0:
                 self.hist[2,oldregion] += 1.0

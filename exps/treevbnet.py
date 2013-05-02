@@ -7,6 +7,7 @@ import tables as t
 import zlib
 import cPickle
 import time as gtime
+import pylab as p
 
 from samcnet.samc import SAMCRun
 from samcnet.treenet import TreeNet, generateTree, generateData
@@ -33,10 +34,10 @@ if 'WORKHASH' in os.environ:
     except:
         sys.exit("ERROR in worker: Need REDIS environment variable defined.")
 
-N = 10
+N = 5
 comps = 2
 iters = 1e4
-numdata = 30
+numdata = 20
 burn = 1000
 stepscale = 100000
 temperature = 3.0
@@ -64,13 +65,15 @@ ground = TreeNet(N, data=data, graph=groundgraph)
         #r.hset('jobs:grounds', jobhash, zlib.compress(cPickle.dumps(ground)))
 
 b1 = TreeNet(N, data=data, ground=ground, priorweight=priorweight,
-        template=template, verbose=True)
-s1 = SAMCRun(b1,burn,stepscale,refden,thin,verbose=True)
+        template=template)
+s1 = SAMCRun(b1,burn,stepscale,refden,thin)
 time()
 s1.sample(iters, temperature)
 time()
 
 ############## bayesnetcpd ############
+#temperature = 300.0
+
 joint = utils.graph_to_joint(groundgraph)
 states = np.ones(len(joint.dists),dtype=np.int32)*2
 ground = BayesNetCPD(states, data)
@@ -79,7 +82,7 @@ ground.set_cpds(joint)
 obj = BayesNetCPD(states, data)
 
 b2 = BayesNetSampler(obj, template, ground, priorweight)
-s2 = SAMCRun(b2,burn,stepscale,refden,thin,verbose=True)
+s2 = SAMCRun(b2,burn,stepscale,refden,thin)
 time()
 s2.sample(iters, temperature)
 time()
@@ -87,6 +90,10 @@ time()
 
 s1.compute_means()
 s2.compute_means()
+
+utils.plotHist(s1)
+utils.plotHist(s2)
+p.show()
 
 #if 'WORKHASH' in os.environ:
     #r.lpush('jobs:done:' + jobhash, s.read_db())
