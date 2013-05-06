@@ -19,15 +19,15 @@ if 'WORKHASH' in os.environ:
     except:
         sys.exit("ERROR in worker: Need REDIS environment variable defined.")
 
-N = 7
-iters = 1e4
+N = 4
+iters = 1e2
 numdata = 20
 priorweight = 5
 numtemplate = 5
-burn = 100
+burn = 10
 stepscale=100000
 temperature = 100.0
-thin = 10
+thin = 2
 refden = 0.0
 
 random.seed(123456)
@@ -50,7 +50,7 @@ ground.set_cpds(joint)
 obj = BayesNetCPD(states, data)
 
 b = BayesNetSampler(obj, template, ground, priorweight)
-s = SAMCRun(b,burn,stepscale,refden,thin,verbose=True)
+s = SAMCRun(b,burn,stepscale,refden,thin)
 s.sample(iters, temperature)
 
 s.compute_means()

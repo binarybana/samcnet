@@ -13,7 +13,7 @@ from numpy import log2
 
 class TreeNet():
     def __init__(self, numnodes, data=None, template=None, priorweight=1.0,
-            verbose=False, ground=None, graph=None):
+            ground=None, graph=None, verbose=False):
         if graph is None:
             self.graph = nx.DiGraph()
             self.graph.add_nodes_from(range(numnodes), marginal=0.5, 
@@ -38,7 +38,7 @@ class TreeNet():
     def global_edge_presence(self):
         mat = np.array(nx.to_numpy_matrix(self.graph),dtype=np.int32)
         groundmat = np.array(nx.to_numpy_matrix(self.ground.graph),dtype=np.int32)
-        return float(np.abs(mat - groundmat).sum()) / self.graph.number_of_nodes()**2
+        return float(np.abs(mat - groundmat).sum()) 
 
     def propose(self):
         self.oldgraph = self.graph.copy()

@@ -36,44 +36,40 @@ if 'WORKHASH' in os.environ:
 
 N = 5
 comps = 2
-iters = 1e4
-numdata = 20
+iters = 3e5
+numdata = 30
 burn = 1000
-stepscale = 100000
-temperature = 3.0
-thin = 10
+stepscale = 30000
+temperature = 1.0
+thin = 50
 refden = 0.0
 numtemplate = 10
-priorweight = 1.0
+priorweight = 0.0
 
 random.seed(12345)
 np.random.seed(12345)
 
 groundgraph = generateTree(N, comps)
 data = generateData(groundgraph,numdata)
-data2, states, joint = gen.generateData(groundgraph,numdata,method='noisylogic')
 template = sampleTemplate(groundgraph, numtemplate)
+
+if 'WORKHASH' in os.environ:
+    jobhash = os.environ['WORKHASH']
+    if not r.hexists('jobs:grounds', jobhash):
+        r.hset('jobs:grounds', jobhash, zlib.compress(cPickle.dumps(groundgraph)))
 
 random.seed()
 np.random.seed()
 
 ground = TreeNet(N, data=data, graph=groundgraph)
 
-#if 'WORKHASH' in os.environ:
-    #jobhash = os.environ['WORKHASH']
-    #if not r.hexists('jobs:grounds', jobhash):
-        #r.hset('jobs:grounds', jobhash, zlib.compress(cPickle.dumps(ground)))
-
-b1 = TreeNet(N, data=data, ground=ground, priorweight=priorweight,
-        template=template)
-s1 = SAMCRun(b1,burn,stepscale,refden,thin)
-time()
-s1.sample(iters, temperature)
-time()
+#b1 = TreeNet(N, data, template, priorweight, ground)
+#s1 = SAMCRun(b1,burn,stepscale,refden,thin)
+#time()
+#s1.sample(iters, temperature)
+#time()
 
 ############## bayesnetcpd ############
-#temperature = 300.0
-
 joint = utils.graph_to_joint(groundgraph)
 states = np.ones(len(joint.dists),dtype=np.int32)*2
 ground = BayesNetCPD(states, data)
@@ -88,12 +84,9 @@ s2.sample(iters, temperature)
 time()
 ############## bayesnetcpd ############
 
-s1.compute_means()
+#s1.compute_means()
 s2.compute_means()
 
-utils.plotHist(s1)
-utils.plotHist(s2)
-p.show()
-
-#if 'WORKHASH' in os.environ:
-    #r.lpush('jobs:done:' + jobhash, s.read_db())
+if 'WORKHASH' in os.environ:
+    #r.lpush('jobs:done:' + jobhash, s1.read_db())
+    r.lpush('jobs:done:' + jobhash, s2.read_db())
