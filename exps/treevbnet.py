@@ -34,8 +34,8 @@ if 'WORKHASH' in os.environ:
     except:
         sys.exit("ERROR in worker: Need REDIS environment variable defined.")
 
-N = 5
-comps = 2
+N = 10
+comps = 3
 iters = 3e5
 numdata = 30
 burn = 1000
@@ -61,10 +61,10 @@ if 'WORKHASH' in os.environ:
 random.seed()
 np.random.seed()
 
-ground = TreeNet(N, data=data, graph=groundgraph)
 ############### TreeNet ##############
 
-#b1 = TreeNet(N, data, template, priorweight, ground)
+#groundtree = TreeNet(N, data=data, graph=groundgraph)
+#b1 = TreeNet(N, data, template, priorweight, groundtree)
 #s1 = SAMCRun(b1,burn,stepscale,refden,thin)
 #time()
 #s1.sample(iters, temperature)
@@ -73,24 +73,29 @@ ground = TreeNet(N, data=data, graph=groundgraph)
 #s1.compute_means()
 #if 'WORKHASH' in os.environ:
     #r.lpush('jobs:done:' + jobhash, s1.read_db())
+#s1.db.close()
 
-############## bayesnetcpd ############
+############# bayesnetcpd ############
+
+#import pstats, cProfile
 
 joint = utils.graph_to_joint(groundgraph)
 states = np.ones(len(joint.dists),dtype=np.int32)*2
-ground = BayesNetCPD(states, data)
-ground.set_cpds(joint)
+groundbnet = BayesNetCPD(states, data)
+groundbnet.set_cpds(joint)
 
 obj = BayesNetCPD(states, data)
-b2 = BayesNetSampler(obj, template, ground, priorweight)
+b2 = BayesNetSampler(obj, template, groundbnet, priorweight)
 s2 = SAMCRun(b2,burn,stepscale,refden,thin)
 time()
+#cProfile.runctx("s2.sample(iters, temperature)", globals(), locals(), "prof.prof")
 s2.sample(iters, temperature)
 time()
 s2.compute_means()
+#s2.compute_means(cummeans=False)
 if 'WORKHASH' in os.environ:
     r.lpush('jobs:done:' + jobhash, s2.read_db())
-    
+s2.db.close()
 #######################################
-#
+###
 
