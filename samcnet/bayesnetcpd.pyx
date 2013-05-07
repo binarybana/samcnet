@@ -8,6 +8,7 @@ cimport dai_bind as dai
 from libcpp.vector cimport vector
 from libcpp.string cimport string
 from libcpp.map cimport map
+from libcpp.pair cimport pair
 
 import numpy as np
 cimport numpy as np
@@ -267,6 +268,31 @@ cdef class BayesNetCPD:
     def num_edges(self):
         cdef int i
         return (self.mat-np.eye(self.mat.shape[0],dtype=np.int)).sum()
+
+    def marginal(self, node):
+        if self.dirty:
+            self.memo_entropy = self.entropy()
+        # Now we know our entropy AND our JTree are correct
+        cdef int i
+        marg = self.jtree.calcMarginal(VarSet(self.pnodes[node]))
+        res = np.empty(marg.nrStates())
+        for i in range(marg.nrStates()):
+            res[i] = marg[i]
+        return res
+
+    def print_factor(self, node):
+        cdef:
+            Factor fac = self.fg.factor(node)
+            map[Var, size_t] mapstate
+            int i
+            pair[Var,size_t] v
+
+        for i in range(fac.nrStates()):
+            mapstate = calcState(fac.vars(), i)
+            print "i:%d " % i,
+            for v in mapstate:
+                print "%d %d" % (v.first.label(),v.second),
+            print "%f" % fac[i]
 
     def kld(self, BayesNetCPD other):
         if self.dirty:
