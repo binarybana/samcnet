@@ -503,9 +503,7 @@ cdef class BayesNetCPD:
         """
         cdef int s
         cdef Factor oldfac = self.fg.factor(node)
-
         cdef VarSet oldvars = oldfac.vars()
-
         cdef VarSet addvars = VarSet()
         cdef VarSet delvars = VarSet()
 
@@ -517,9 +515,25 @@ cdef class BayesNetCPD:
         cdef VarSet newvars = (oldvars|addvars)/delvars
         cdef Factor newfac = Factor(newvars)
 
+        arity = self.states[node]
+        alpha = np.ones(arity)
         for s in range(newfac.nrStates()):
             newval = oldfac.get(calcLinearState(oldvars, calcState(newvars, s)))
             newfac.set(s, newval) 
+
+        #TESTING if I keep this then I can delete some of the above
+        cdef VarSet parents = newfac.vars()
+        parents.erase(self.pnodes[node])
+        parstates = dai.BigInt_size_t(parents.nrStates())
+        arity = self.states[node]
+        alpha = np.ones(arity)
+        for p in range(parstates):
+            newval = np.random.dirichlet(alpha)
+            state = dai.calcState(parents, p)
+            for s in range(arity):
+                state[self.pnodes[node]] = s
+                aggstate = dai.calcLinearState(newfac.vars(), state)
+                newfac.set(aggstate, newval[s])
 
         if undo: #For some reason Cython does not seem to be able to pass False into setFactor
             self.fg.setFactor(node, newfac, True)
@@ -542,6 +556,7 @@ cdef class BayesNetCPD:
         ## B of dirichlet distribution from wikipedia)
         ##return -rem_count * lgamma(self.arity)
         #return 0 # As we are not introducing new parameters right?
+
         return 0.0
 
     def move_params(self, int node):

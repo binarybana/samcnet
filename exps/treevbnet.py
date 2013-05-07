@@ -62,6 +62,7 @@ random.seed()
 np.random.seed()
 
 ground = TreeNet(N, data=data, graph=groundgraph)
+############### TreeNet ##############
 
 #b1 = TreeNet(N, data, template, priorweight, ground)
 #s1 = SAMCRun(b1,burn,stepscale,refden,thin)
@@ -69,24 +70,27 @@ ground = TreeNet(N, data=data, graph=groundgraph)
 #s1.sample(iters, temperature)
 #time()
 
+#s1.compute_means()
+#if 'WORKHASH' in os.environ:
+    #r.lpush('jobs:done:' + jobhash, s1.read_db())
+
 ############## bayesnetcpd ############
+
 joint = utils.graph_to_joint(groundgraph)
 states = np.ones(len(joint.dists),dtype=np.int32)*2
 ground = BayesNetCPD(states, data)
 ground.set_cpds(joint)
 
 obj = BayesNetCPD(states, data)
-
 b2 = BayesNetSampler(obj, template, ground, priorweight)
 s2 = SAMCRun(b2,burn,stepscale,refden,thin)
 time()
 s2.sample(iters, temperature)
 time()
-############## bayesnetcpd ############
-
-#s1.compute_means()
 s2.compute_means()
-
 if 'WORKHASH' in os.environ:
-    #r.lpush('jobs:done:' + jobhash, s1.read_db())
     r.lpush('jobs:done:' + jobhash, s2.read_db())
+    
+#######################################
+#
+
