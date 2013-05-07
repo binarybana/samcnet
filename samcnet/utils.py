@@ -6,6 +6,7 @@ import pandas as pa
 #import pebl as pb
 import StringIO as si
 import tempfile
+import tables as t
 
 from probability import CPD,fast_space_iterator,JointDistribution
 
@@ -29,48 +30,121 @@ def graph_to_joint(graph):
 def getHost():
     return os.uname()[1].split('.')[0]
 
+def plot_h5(loc):
+    fid = t.openFile(loc, 'r')
+    samcattrs = fid.root.samc._v_attrs
+    energy = np.linspace(samcattrs['lowEnergy'], samcattrs['highEnergy'], samcattrs['grid'])
+    theta = fid.root.samc.theta_hist.read()
+    counts = fid.root.samc.freq_hist.read()
+    theta_trace = fid.root.samc.theta_trace.read()
+    energy_trace = fid.root.samc.energy_trace.read()
+    burn = samcattrs['burnin']
+    _plot_SAMC(energy, theta, counts, energy_trace, theta_trace, burn)
+
 def plotHist(s):
+    _plot_SAMC(s.hist[0], s.hist[1], s.hist[2],
+            s.db.root.samc.energy_trace.read(),  
+            s.db.root.samc.theta_trace.read(), s.burn)
+
+def _plot_SAMC(energy, theta, counts, energy_trace, theta_trace, burn):
     rows = 3
     cols = 2
 
     p.figure()
     p.subplot(rows, cols, 1)
-    p.plot(s.hist[0], s.hist[1], 'k.')
+    p.plot(energy, theta, 'k.')
     p.title("Region's theta values")
     p.ylabel('Theta')
     p.xlabel('Energy')
 
     p.subplot(rows, cols, 2)
-    p.plot(s.hist[0], s.hist[2], 'k.')
+    p.plot(energy, counts, 'k.')
     p.title("Region's Sample Counts")
     p.ylabel('Count')
     p.xlabel('Energy')
 
-    energies = s.db.root.samc.energy_trace.read()
-    thetas = s.db.root.samc.theta_trace.read()
-
     p.subplot(rows, cols, 3)
-    p.plot(np.arange(s.burn, energies.shape[0]+s.burn), energies, 'k.')
+    p.plot(np.arange(burn, energy_trace.shape[0]+burn), energy_trace, 'k.')
     p.title("Energy Trace")
     p.ylabel('Energy')
     p.xlabel('Iteration')
 
     p.subplot(rows, cols, 4)
-    p.plot(np.arange(s.burn, thetas.shape[0]+s.burn), thetas, 'k.')
+    p.plot(np.arange(burn, theta_trace.shape[0]+burn), theta_trace, 'k.')
     p.ylabel('Theta Trace')
     p.xlabel('Iteration')
         
     p.subplot(rows, cols, 5)
-    part = np.exp(thetas - thetas.max())
+    part = np.exp(theta_trace - theta_trace.max())
     p.hist(part, log=True, bins=100)
     p.xlabel('exp(theta - theta_max)')
     p.ylabel('Number of samples at this value')
-    p.title('Histogram of normalized sample thetas from %d iterations' % thetas.shape[0])
+    p.title('Histogram of normalized sample thetas from %d iterations' % theta_trace.shape[0])
 
     p.subplot(rows, cols, 6)
     p.hist(part, weights=part, bins=50)
     p.xlabel('exp(theta - theta_max)')
     p.ylabel('Amount of weight at this value')
+
+def plot_nodes(loc, node, parts=[0.0, 0.1, 0.2]):
+    filelist = os.listdir(loc)
+    n = len(filelist)
+    avgs = [np.empty(n) for i in parts]
+    for i,d in enumerate(filelist):
+        fid = t.openFile(os.path.join(loc,d), 'r')
+        theta_trace = fid.root.samc.theta_trace.read()
+        n = theta_trace.shape[0]
+        array = fid.getNode(node).read()
+        inds = theta_trace.argsort()
+        theta_sort = theta_trace[inds]
+        array_sort = array[inds]
+
+        for j,frac in enumerate(parts):
+            last = int(n*(1-frac))
+            part = np.exp(theta_sort[:last] - theta_sort[:last].max())
+            denom = part.sum()
+            numerator = (part * array_sort[:last]).sum()
+            avgs[j][i] = numerator / denom
+    # Plotting
+    rows = len(parts) 
+    cols = 1
+    agg = np.hstack(avgs)
+    bins = np.linspace(agg.min()-0.3, agg.max()+0.3, 20)
+    p.figure()
+    for i,frac in enumerate(parts):
+        p.subplot(rows, cols, i+1)
+        p.hist(avgs[i], bins=bins)
+        p.title('%s at %.3f fraction' % (node, frac))
+
+def plot_thetas(loc, parts=[0.1, 0.2]):
+    fid = t.openFile(loc, 'r')
+    theta_trace = fid.root.samc.theta_trace.read()
+    _plot_thetas(theta_trace, parts)
+
+def _plot_thetas(theta_trace, parts):
+    rows = len(parts) + 1
+    cols = 2
+
+    theta_trace.sort()
+    n = theta_trace.shape[0]
+
+    def plot_theta_hist(i, frac):
+        p.subplot(rows, cols, 2*i+1)
+        last = int(n*(1-frac))
+        part = np.exp(theta_trace[:last] - theta_trace[:last].max())
+        p.hist(part, log=True, bins=100)
+        p.xlabel('exp(theta - theta_max)')
+        p.ylabel('Number of samples at this value')
+        p.title('Normalized sample thetas at %.3f' % frac)
+
+        p.subplot(rows, cols, 2*i+2)
+        p.hist(part, weights=part, bins=50)
+        p.xlabel('exp(theta - theta_max)')
+        p.ylabel('Amount of weight at this value')
+
+    p.figure()
+    for i,part in enumerate([0.0] + parts):
+        plot_theta_hist(i,part)
 
 def plotScatter(s):
     energies = s.db.root.samc.energy_trace.read()
