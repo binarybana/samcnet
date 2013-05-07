@@ -194,6 +194,25 @@ cdef class SAMCRun:
                     numerator = (part * funcs).sum()
                     meangroup._v_attrs[item.name] = float(numerator/denom)
 
+    def truncate_means(self, trunc):
+        assert self.db != None, 'db not initialized'
+        #assert len(self.db) != 0, 'Length of db is zero! Perhaps you have not "\
+                #"proceeded beyond the burn-in period'
+
+        thetas = self.db.root.samc.theta_trace.read()
+        n = thetas.shape[0]
+        assert 0.0 <= trunc <= 1.0
+        last = int(n*(1-trunc))
+        part = np.exp(thetas[:last] - thetas[:last].max())
+        denom = part.sum()
+        meangroup = self.db.createGroup('/computed', 'means-%f'%trunc, 
+                'Means truncated at %f'%trunc)
+        for item in self.db.walkNodes('/object'):
+            if isinstance(item, t.array.Array):
+                funcs = item.read().astype(np.float)
+                numerator = (part * funcs).sum()
+                meangroup._v_attrs[item.name] = float(numerator/denom)
+
     cdef find_region(self, energy):
         cdef int i
         if energy > self.highEnergy: 
