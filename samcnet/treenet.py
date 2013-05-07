@@ -131,7 +131,7 @@ class TreeNet():
         self.graph.node[n2]['delta'] = np.nan
         self.graph.node[n2]['eta'] = np.nan
         if marginal is None:
-            self.graph.node[n2]['marginal'] = marginal
+            self.graph.node[n2]['marginal'] = 0.5
         else:
             self.graph.node[n2]['marginal'] = np.random.rand()
         assert nx.is_directed_acyclic_graph(self.graph)
