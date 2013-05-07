@@ -497,6 +497,7 @@ cdef class BayesNetCPD:
         for i in range(fac.nrStates()):
             fac.set(i, newfac[i])
         self.fg.setFactor(node, fac)
+        self.dirty = True
     
     def adjust_factor(self, int node, object addlist, object dellist, object undo=False):
         """ Adjust the factor according to the add list and delete list 
@@ -506,6 +507,8 @@ cdef class BayesNetCPD:
         cdef VarSet oldvars = oldfac.vars()
         cdef VarSet addvars = VarSet()
         cdef VarSet delvars = VarSet()
+
+        self.dirty = True
 
         for var in addlist:
             addvars.insert(self.pnodes[var])
@@ -565,6 +568,8 @@ cdef class BayesNetCPD:
         cdef Factor fac = self.fg.factor(node)
         cdef map[Var, size_t] state
 
+        self.dirty = True
+
         std = 0.3
         cdef VarSet parents = fac.vars()
         parents.erase(self.pnodes[node])
@@ -613,6 +618,7 @@ cdef class BayesNetCPD:
         self.fg.clearBackups()
 
     def restore_backups(self):
+        self.dirty = True
         self.fg.restoreFactors()
 
     def __repr__(self):
