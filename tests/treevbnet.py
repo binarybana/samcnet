@@ -16,10 +16,10 @@ from samcnet import utils
 from samcnet.generator import sampleTemplate
 import samcnet.generator as gen
 
-N = 3
+N = 5
 comps = 2
 iters = 3e5
-numdata = 0
+numdata = 30
 burn = 1000
 stepscale = 30000
 temperature = 1.0
@@ -59,10 +59,26 @@ b2 = BayesNetSampler(obj, template, groundbnet, priorweight)
     
 #######################################
 
-b2.bayesnet.adjust_factor(1,[2],[])
-b2.bayesnet.set_factor(1,[0.9,0.1,0.9,0.1])
+def test():
+	def close_enough(n1,n2):
+		return (n1-n2) < 1e-5
+		return (n1-n2) < np.finfo(float).eps
 
-b1.add_edge(2,1,0.9,0.1)
+	assert close_enough(groundtree.kld(b1), groundbnet.kld(b2.bayesnet))
 
+	b2.bayesnet.adjust_factor(1,[2],[])
+	b2.bayesnet.set_factor(1,[0.9,0.1,0.9,0.1])
 
+	b1.add_edge(2,1,0.9,0.1)
+
+	assert close_enough(groundtree.entropy(), groundbnet.entropy())
+	assert close_enough(groundtree.kld(b1), groundbnet.kld(b2.bayesnet))
+
+energy = 0.0
+count = 0 
+while groundbnet.kld(b2.bayesnet) >= 0.0:
+	b2.propose()
+	count += 1
+	if b2.energy() > 10000:
+		b2.reject()
 
