@@ -21,7 +21,7 @@ def graph_to_joint(graph):
             params = {(0,):np.r_[1-eta], (1,):np.r_[delta]}
             pars = {graph.predecessors(node)[0]:2}
         else:
-            params = {():np.r_[marg]}
+            params = {():np.r_[1-marg]}
             pars = {}
         joint.add_distribution(CPD(node,2,params,pars))
 

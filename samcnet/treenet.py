@@ -197,9 +197,9 @@ class TreeNet():
                 eta = p['eta']
                 parmarg = self.graph.node[self.graph.predecessors(i)[0]]['marginal']
                 if delta != 0.0 and delta != 1.0: # FIXME: Float comparisons
-                    h -= (1-parmarg)*(delta*log2(delta) + (1-delta)*log2(1-delta))
+                    h -= (parmarg)*(delta*log2(delta) + (1-delta)*log2(1-delta))
                 if eta != 0.0 and eta != 1.0: # FIXME: Float comparisons
-                    h -= parmarg*(eta*log2(eta) + (1-eta)*log2(1-eta))
+                    h -= (1-parmarg)*(eta*log2(eta) + (1-eta)*log2(1-eta))
         self.memo_entropy = h
         return h
 
@@ -217,8 +217,8 @@ class TreeNet():
                 parmarg = self.graph.node[parent]['marginal']
 
                 cond = self.cond_prob(i, parent) 
-                div -= (1-parmarg)*(cond[1]*log2(1-p['delta']) + (1-cond[1])*log2(p['delta'])) \
-                    + (parmarg)*(cond[0]*log2(p['eta']) + (1-cond[0])*log2(1-p['eta'])) # parent = 1?
+                div -= (parmarg)*(cond[1]*log2(1-p['delta']) + (1-cond[1])*log2(p['delta'])) \
+                    + (1-parmarg)*(cond[0]*log2(p['eta']) + (1-cond[0])*log2(1-p['eta'])) # parent = 0
         return div
 
     def cond_prob(self, node, cond):
