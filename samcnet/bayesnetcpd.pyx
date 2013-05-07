@@ -1,4 +1,4 @@
-# cython: profile=False
+# cython: profile=True
 cimport cython
 
 from bayesnet cimport BayesNet
@@ -61,6 +61,9 @@ cdef class BayesNetSampler:
         if self.ground:
             db.createEArray(objroot.objfxn, 'kld', t.Float64Atom(), (0,), expectedrows=size)
             db.createEArray(objroot.objfxn, 'edge_distance', t.Float64Atom(), (0,), expectedrows=size)
+            objroot._v_attrs.true_entropy = self.ground.entropy()
+            objroot._v_attrs.true_energy = self.ground.energy()
+            objroot._v_attrs.true_numedges = self.ground.num_edges()
         if self.verbose:
             N = self.x.size
             db.createEArray(objroot.samples, 'mat', t.UInt8Atom(), shape=(0,N,N),
@@ -86,13 +89,21 @@ cdef class BayesNetSampler:
                 self.bayesnet.x
         cdef np.ndarray[np.int32_t, ndim=2, mode="c"] mat = \
                 self.bayesnet.mat
+        cdef np.ndarray[np.int32_t, ndim=2, mode="c"] ntemplate = \
+                self.ntemplate
         cdef double priordiff = 0.0
-        ntemplate = self.ntemplate
+        cdef double cptaccum = 0.0
+        cdef int i,j
+        cdef float e = self.bayesnet.energy()
         for i in range(self.bayesnet.node_num):
             for j in range(self.bayesnet.node_num):
                 if(j!=i):
                     priordiff += abs(mat[j,i] - ntemplate[x[j],x[i]]) 
-        return (priordiff)*self.prior_structural + self.bayesnet.energy()
+
+        #for i in range(self.bayesnet.node_num):
+            #pass
+
+        return (priordiff)*self.prior_structural + e
 
     def propose(self):
         self.bayesnet.mutate()
@@ -118,14 +129,14 @@ cdef class BayesNetCPD:
         self.memo_entropy = 0.0
         self.dirty = True
     
-    def __init__(self, states, data=None):
+    def __init__(self, states, data=None, limparent=1):
         cdef int i, j 
 
         self.logqfactor = 0.0
         self.data = data
         self.states = states
         self.node_num = states.shape[0]
-        self.limparent = 1
+        self.limparent = limparent
         self.x = np.arange(self.node_num, dtype=np.int32)
         self.mat = np.eye(self.node_num, dtype=np.int32)
         self.fvalue = np.zeros((self.node_num,), dtype=np.double)
@@ -199,32 +210,37 @@ cdef class BayesNetCPD:
             print "Energy top"
         cdef np.ndarray[np.int32_t, ndim=1, mode="c"] x = \
                 self.x
+        cdef np.ndarray[np.int32_t, ndim=1, mode="c"] changelist = \
+                self.changelist
         cdef np.ndarray[np.int32_t, ndim=2, mode="c"] mat = \
                 self.mat
 
         cdef int i,j,node,data,index,arity,parstate,state
         cdef double sum, accum
+        cdef map[Var, size_t] statemap
         accum = 0
 
         # Limit the number of parents
         for i in range(self.changelength):
-            if self.fg.factor(x[self.changelist[i]]).vars().size()-1 > self.limparent:
+            if self.fg.factor(x[changelist[i]]).vars().size()-1 > self.limparent:
                 return 1e20
 
         cdef vector[vector[int]] counts = vector[vector[int]]()
         for i in range(self.changelength):
-            node = x[self.changelist[i]]
+            node = x[changelist[i]]
             counts.push_back(vector[int](self.fg.factor(node).nrStates()))
         
         for data in range(self.pdata.size()):
             for i in range(counts.size()):
-                node = x[self.changelist[i]]
-                index = self.convert(node, self.pdata[data])
-                counts[i][index] = counts[i][index] + 1
+                node = x[changelist[i]] #inlined convert here
+                for j in range(self.pdata[data].size()):
+                    statemap[self.pnodes[j]] = self.pdata[data][j]
+                index = calcLinearState(self.fg.factor(node).vars(), statemap)
+                counts[i][index] += 1
 
         for i in range(counts.size()):
             accum = 0
-            node = x[self.changelist[i]]
+            node = x[changelist[i]]
             arity = self.pnodes[node].states()
             numparstates = self.fg.factor(node).nrStates()/arity
             fac = self.fg.factor(node)
@@ -330,6 +346,15 @@ cdef class BayesNetCPD:
                     prob = joint[index]/marginal[parstate]
                     subaccum += prob * log(cpd_lookup,2)
                 accum += marginal[parstate] * subaccum
+
+        if -self.memo_entropy - accum < 0:
+            import sys
+            sys.stderr.write("ERROR! kld negative %f for these parameters:\n"% 
+                    (-self.memo_entropy - accum))
+            sys.stderr.write(other.__repr__())
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+
         return -self.memo_entropy - accum
 
     def entropy(self):
@@ -359,6 +384,19 @@ cdef class BayesNetCPD:
         self.dirty = False
         self.memo_entropy = accum
         return accum
+
+    def read_from_file(self, location):
+        self.dirty = True
+        self.clear_backups()
+        cdef FactorGraph newfg
+        newfg.ReadFromFile(location)
+
+        self.node_num = newfg.nrVars()
+        self.pnodes.clear()
+        self.pnodes = newfg.vars()
+        self.fg = newfg
+        self.memo_entropy = self.entropy()
+        # TODO WILL NOT WORK FOR PROPOSALS etc.. only entropy/kld
 
     def naive_entropy(self):
         cdef:
@@ -477,6 +515,8 @@ cdef class BayesNetCPD:
                 self.mat[i,j] = 1-self.mat[i,j]
                 underparlimit = self.mat[:,j].sum() > (self.limparent+1) 
                 #+1 because of unitary diagonal
+                self.mat[i,j] = 1-self.mat[i,j] #revert in case we loop again
+            self.mat[i,j] = 1-self.mat[i,j] #inefficient, but simple
 
             self.changelength=1
             self.changelist[0]=j

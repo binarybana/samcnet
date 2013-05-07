@@ -67,6 +67,7 @@ cdef extern from "dai/factorgraph.h" namespace "dai":
         FactorGraph(vector[Factor] &)
         Var & var(size_t)
         FactorGraph* clone()
+        vector[Var] & vars()
         size_t nrVars()
         size_t nrFactors()
         size_t nrEdges()
@@ -76,6 +77,7 @@ cdef extern from "dai/factorgraph.h" namespace "dai":
         void setFactor(int, Factor) except +
         void clearBackups() except +
         void restoreFactors() except +
+        void ReadFromFile(char*)
 
 cdef extern from "dai/jtree.h" namespace "dai":
     cdef cppclass JTree:
