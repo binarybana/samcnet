@@ -1,4 +1,4 @@
-# cython: profile=False
+# cython: profile=True
 cimport cython
 from libc.math cimport exp, ceil, floor
 
@@ -169,25 +169,30 @@ cdef class SAMCRun:
 
         thetas = self.db.root.samc.theta_trace.read()
         part = np.exp(thetas - thetas.max())
-        denom = part.cumsum()
 
         if not 'computed' in self.db.root:
             self.db.createGroup('/', 'computed', 'Computed quantities')
-        if not 'cummeans' in self.db.root.computed:
+        if cummeans and not 'cummeans' in self.db.root.computed:
             cumgroup = self.db.createGroup('/computed', 'cummeans', 'Cumulative means')
         if not 'means' in self.db.root.computed:
             meangroup = self.db.createGroup('/computed', 'means', 'Means')
         for item in self.db.walkNodes('/object'):
             if isinstance(item, t.array.Array):
                 funcs = item.read().astype(np.float)
-                numerator = (part * funcs.T).T.cumsum(axis=0)
-                if item.name in cumgroup:
-                    raise Exception("Not implemented yet: multiple calls to func_cummean")
-                arr = self.db.createCArray(cumgroup, item.name, 
-                        t.Float64Atom(shape=funcs[-1].shape), 
-                        (thetas.size,))
-                arr[:] = (numerator.T / denom).T
-                meangroup._v_attrs[item.name] = arr[-1]
+                if cummeans:
+                    numerator = (part * funcs.T).T.cumsum(axis=0)
+                    if item.name in cumgroup:
+                        raise Exception("Not implemented yet: multiple calls to func_cummean")
+                    arr = self.db.createCArray(cumgroup, item.name, 
+                            t.Float64Atom(shape=funcs[-1].shape), 
+                            (thetas.size,))
+                    denom = part.cumsum()
+                    arr[:] = (numerator.T / denom).T
+                    meangroup._v_attrs[item.name] = arr[-1]
+                else:
+                    denom = part.sum()
+                    numerator = (part * funcs).sum()
+                    meangroup._v_attrs[item.name] = float(numerator/denom)
 
     cdef find_region(self, energy):
         cdef int i
