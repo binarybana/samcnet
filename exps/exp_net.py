@@ -1,23 +1,14 @@
 import sys, os, random
+import zlib, cPickle
 ############### SAMC Setup ############### 
-print "Starting job"
-
-sys.path.append('build') # Yuck!
-sys.path.append('.')
-sys.path.append('lib')
-
 import numpy as np
 import scipy as sp
 import networkx as nx
-import samcnet.utils as utils
 
-try:
-    from samcnet.samc import SAMCRun
-    from samcnet.bayesnetcpd import BayesNetCPD, BayesNetSampler
-    from samcnet.generator import *
-except ImportError as e:
-    sys.exit("Make sure LD_LIBRARY_PATH is set correctly and that the build"+\
-            " directory is populated by waf.\n\n %s" % str(e))
+from samcnet.samc import SAMCRun
+from samcnet.bayesnetcpd import BayesNetSampler, BayesNetCPD
+from samcnet import utils
+from samcnet.generator import *
 
 if 'WORKHASH' in os.environ:
     try:
@@ -28,46 +19,47 @@ if 'WORKHASH' in os.environ:
         sys.exit("ERROR in worker: Need REDIS environment variable defined.")
 ############### /SAMC Setup ############### 
 
-N = 4
-iters = 1e4
-numdata = 20
-priorweight = 5
-numtemplate = 5
-burn = 10000
-stepscale=100000
-temperature = 5.0
-thin = 100
+N = 8
+iters = 3e5
+numdata = 40
+priorweight = 0.0
+numtemplate = 10
+burn = 1000
+stepscale = 5000
+temperature = 10.0
+thin = 50
 refden = 0.0
 
 random.seed(12345)
 np.random.seed(12345)
 
 groundgraph = generateHourGlassGraph(nodes=N)
-data, states, joint = generateData(groundgraph,numdata,method='noisylogic')
-#data, states, joint = generateData(groundgraph,numdata,method='dirichlet')
+#joint, states = generateJoint(groundgraph, method='dirichlet')
+joint, states = generateJoint(groundgraph, method='noisylogic')
+data = generateData(groundgraph, joint, numdata)
 template = sampleTemplate(groundgraph, numtemplate)
 
-print "Joint:"
-print joint
+if 'WORKHASH' in os.environ:
+    jobhash = os.environ['WORKHASH']
+    if not r.hexists('jobs:grounds', jobhash):
+        r.hset('jobs:grounds', jobhash, zlib.compress(cPickle.dumps(groundgraph)))
 
 random.seed()
 np.random.seed()
 
-ground = BayesNetCPD(states, data)
-ground.set_cpds(joint)
+groundbnet = BayesNetCPD(states, data, limparent=3)
+groundbnet.set_cpds(joint)
 
-obj = BayesNetCPD(states, data)
+obj = BayesNetCPD(states, data, limparent=3)
 
-b = BayesNetSampler(obj, template, ground, priorweight)
-s = SAMCRun(b,burn,stepscale,refden,thin,verbose=True)
+b = BayesNetSampler(obj, template, groundbnet, priorweight)
+s = SAMCRun(b,burn,stepscale,refden,thin)
 s.sample(iters, temperature)
 
-res = []
-for acc in [lambda x: x[0], lambda x: x[1], lambda x: x[2]]:
-    for get in [s.func_mean, s.func_cummean]:
-        res.append(get(acc))
-
-res = utils.prepare_data([utils.encode_element(x) for x in res])
+s.compute_means()
+#s.compute_means(cummeans=False)
 
 if 'WORKHASH' in os.environ:
-    r.lpush('jobs:done:'+os.environ['WORKHASH'], res)
+    r.lpush('jobs:done:' + jobhash, s.read_db())
+s.db.close()
+#############

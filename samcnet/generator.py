@@ -83,34 +83,35 @@ def dirichlet(name, arity, pdomain):
         params[key] = np.random.dirichlet([1.]*(arity))[:-1]
     return CPD(name, arity, params, pdomain)
 
-def generateData(graph, numpoints=50, noise=0.0, joint=None, method='dirichlet'):
+def generateJoint(graph, method='dirichlet'):
+    numnodes = graph.number_of_nodes()
+    adj = np.array(nx.to_numpy_matrix(graph),dtype=np.int)
+    states = np.ones(numnodes)*2
+    names = graph.nodes() #or maybe np.arange(numnodes)
+
+    if method == 'dirichlet':
+        func = dirichlet
+    elif method == 'noisylogic':
+        assert np.all(states == 2) # we can generalize this later
+        func = noisylogic
+    cpds = [func(nd,st,{k:int(states[k]) 
+        for k in graph.predecessors(nd)}) for nd,st in zip(names,states)]
+    joint = JointDistribution()
+    for cpd in cpds:
+        joint.add_distribution(cpd)
+    return joint, states
+
+def generateData(graph, joint, numpoints=50, noise=0.0, ):
     """ 
     Generate <numpoints> random draws from graph, with 
     randomly assigned CPDs and additive zero mean Gaussian 
     noise with std_dev=noise on the observations.
     """
-    order = nx.topological_sort(graph)
     numnodes = graph.number_of_nodes()
+    order = nx.topological_sort(graph)
     adj = np.array(nx.to_numpy_matrix(graph),dtype=np.int)
-    states = np.ones(numnodes)*2
-    #states = np.random.randint(2,3, size=numnodes)
-    names = graph.nodes() #or maybe np.arange(numnodes)
-
-    numparents = adj.sum(axis=0)
-    numparentstates = (states ** numparents)
-
-    if not joint:
-        if method == 'dirichlet':
-            func = dirichlet
-        elif method == 'noisylogic':
-            assert np.all(states == 2) # we can generalize this later
-            func = noisylogic
-        cpds = [func(nd,st,{k:int(states[k]) for k in graph.predecessors(nd)}) for nd,st in zip(names,states)]
-    else:
-        cpds = zip(*sorted((k,v) for k,v in joint.dists.iteritems()))[1] 
-        # TODO fix this by making the next 
-        # section use the straight up joint distribution
-
+    states = np.ones(numnodes)*2 # FIXME this is hardcoded atm
+    cpds = zip(*sorted((k,v) for k,v in joint.dists.iteritems()))[1] 
     draws = np.empty((numpoints, numnodes), dtype=np.int)
     for i in range(numpoints):
         for node in order:
@@ -120,12 +121,7 @@ def generateData(graph, numpoints=50, noise=0.0, joint=None, method='dirichlet')
                 draws[i,node] = np.random.randint(0, states[node])
             else:
                 draws[i,node] = np.searchsorted(np.cumsum(cpds[node].params[parstate]), np.random.random())
-
-    if not joint:
-        joint = JointDistribution()
-        for cpd in cpds:
-            joint.add_distribution(cpd)
-    return draws, states, joint
+    return draws
 
 def sampleTemplate(graph, numEdges=3):
     edges = graph.edges()
@@ -134,8 +130,4 @@ def sampleTemplate(graph, numEdges=3):
     new.remove_edges_from(new.edges())
     new.add_edges_from(edges[:numEdges])
     return new
-
-#x = generateHourGlassGraph(10, 2)
-#visualizeGraph(x)
-#y = generateData(x)
 

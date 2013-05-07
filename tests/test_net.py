@@ -20,13 +20,13 @@ if 'WORKHASH' in os.environ:
         sys.exit("ERROR in worker: Need REDIS environment variable defined.")
 
 N = 4
-iters = 1e2
+iters = 1e3
 numdata = 20
 priorweight = 5
 numtemplate = 5
 burn = 10
-stepscale=100000
-temperature = 100.0
+stepscale=1000
+temperature = 1.0
 thin = 2
 refden = 0.0
 
@@ -34,8 +34,9 @@ random.seed(123456)
 np.random.seed(123456)
 
 groundgraph = generateHourGlassGraph(nodes=N)
-data, states, joint = generateData(groundgraph,numdata,method='noisylogic')
-#data, states, joint = generateData(groundgraph,numdata,method='dirichlet')
+#joint, states = generateJoint(groundgraph, method='dirichlet')
+joint, states = generateJoint(groundgraph, method='noisylogic')
+data = generateData(groundgraph, joint, numdata)
 template = sampleTemplate(groundgraph, numtemplate)
 
 print "Joint:"
@@ -64,3 +65,6 @@ db = t.openFile(fname, 'r')
 
 if 'WORKHASH' in os.environ:
     r.lpush('jobs:done:'+os.environ['WORKHASH'], s.read_db())
+
+db.close()
+s.db.close()
