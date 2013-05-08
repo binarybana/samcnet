@@ -205,11 +205,11 @@ cdef class SAMCRun:
         last = int(n*(1-trunc))
         part = np.exp(thetas[:last] - thetas[:last].max())
         denom = part.sum()
-        meangroup = self.db.createGroup('/computed', 'means-%f'%trunc, 
-                'Means truncated at %f'%trunc)
+        meangroup = self.db.createGroup('/computed', 'means_%d'%(int(100*trunc)), 
+                'Means truncated at %.2f'%trunc)
         for item in self.db.walkNodes('/object'):
             if isinstance(item, t.array.Array):
-                funcs = item.read().astype(np.float)
+                funcs = item.read().astype(np.float)[:last]
                 numerator = (part * funcs).sum()
                 meangroup._v_attrs[item.name] = float(numerator/denom)
 
