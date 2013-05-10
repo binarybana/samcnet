@@ -19,11 +19,22 @@ if 'WORKHASH' in os.environ:
     except:
         sys.exit("ERROR in worker: Need REDIS environment variable defined.")
 
-N = 4
-iters = 1e3
+start = None
+import time as gtime
+def time():
+    global start
+    if start is None:
+        start = gtime.time()
+    else:
+        t = gtime.time()
+        print("Time taken: {} seconds".format(t-start))
+        start = None
+
+N = 8
+iters = 1e4
 numdata = 20
-priorweight = 5
-numtemplate = 5
+priorweight = 5.0
+numtemplate = 10
 burn = 10
 stepscale=1000
 temperature = 1.0
@@ -52,19 +63,21 @@ obj = BayesNetCPD(states, data)
 
 b = BayesNetSampler(obj, template, ground, priorweight)
 s = SAMCRun(b,burn,stepscale,refden,thin)
+time()
 s.sample(iters, temperature)
+time()
 
-s.compute_means()
+#s.compute_means()
 
-fname = '/tmp/test.h5'
-fid = open(fname, 'w')
-fid.write(zlib.decompress(s.read_db()))
-fid.close()
+#fname = '/tmp/test.h5'
+#fid = open(fname, 'w')
+#fid.write(zlib.decompress(s.read_db()))
+#fid.close()
 
-db = t.openFile(fname, 'r')
+#db = t.openFile(fname, 'r')
 
-if 'WORKHASH' in os.environ:
-    r.lpush('jobs:done:'+os.environ['WORKHASH'], s.read_db())
+#if 'WORKHASH' in os.environ:
+    #r.lpush('jobs:done:'+os.environ['WORKHASH'], s.read_db())
 
-db.close()
+#db.close()
 s.db.close()

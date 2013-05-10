@@ -20,14 +20,12 @@ if 'WORKHASH' in os.environ:
 ############### /SAMC Setup ############### 
 
 N = 8
-iters = 3e3
-numdata = 150
+iters = 3e5
 priorweight = 0.0
-numtemplate = 10
+numtemplate = 0
 burn = 1000
-stepscale = 5000
-temperature = 10.0
-thin = 50
+stepscale = 10000
+thin = 10
 refden = 0.0
 
 random.seed(12345)
@@ -46,9 +44,10 @@ if 'WORKHASH' in os.environ:
 random.seed()
 np.random.seed()
 
-datasizes = [5, 50, 150]
+datasizes = [4, 16, 32, 64, 128, 256]
+temps = [1.0, 1.0, 2.0, 2.0, 5.0, 5.0]
 
-for numdata in datasizes:
+for temperature, numdata in zip(temps, datasizes):
     data = generateData(groundgraph, joint, numdata)
     groundbnet = BayesNetCPD(states, data, limparent=3)
     groundbnet.set_cpds(joint)
@@ -56,14 +55,13 @@ for numdata in datasizes:
     b = BayesNetSampler(obj, template, groundbnet, priorweight)
     s = SAMCRun(b,burn,stepscale,refden,thin)
     s.sample(iters, temperature)
-    s.compute_means(cummeans=False)
-    s.truncate_means(0.1)
+    s.compute_means()
 
     if 'WORKHASH' in os.environ:
         r.lpush('jobs:done:' + jobhash, s.read_db())
-        r.lpush('custom:samplesize:%d' % numdata, s.db.root.computed.means._v_attrs['kld'] )
-        r.lpush('custom:samplesize:t=0.1:%d' % numdata, s.db.root.computed.means._v_attrs['kld'] )
-        # TODO Fix the value pushed to the truncated one
+        r.lpush('custom:%s:samplesize=%d' % 
+                (jobhash, numdata), 
+                s.db.root.computed.means._v_attrs['kld'] )
 
     s.db.close()
 

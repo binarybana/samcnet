@@ -20,6 +20,9 @@ from math import lgamma, log
 import networkx as nx
 import tables as t
 
+cdef extern from "math.h":
+    double log2(double)
+
 cdef extern from "utils.h":
     string crepr(FactorGraph &)
     string crepr(Factor &)
@@ -31,22 +34,26 @@ cdef class BayesNetSampler:
     """ 
     == Optional prior information ==
 
-    prior_structural: A float used in the -logP calculations.
+    p_struct: A float used in the -logP calculations.
+    p_cpd: A float used in the -logP calculations.
     template: An adjacency matrix over the nodes with float values from [0,1]
 
     """
     cdef public:
-        object bayesnet, ntemplate, ground, verbose
-        double prior_structural
-    def __init__(self, bayesnet, ntemplate=None, ground=None, prior_structural=1.0, verbose=False):
+        object bayesnet, ntemplate, ground, verbose, marginals
+        double p_struct, p_cpd
+    def __init__(self, bayesnet, ntemplate=None, ground=None, p_struct=0.0, p_cpd=0.0, verbose=False):
         self.bayesnet = bayesnet
         self.verbose = verbose
         if type(ntemplate) == np.array:
             self.ntemplate = ntemplate
+            raise Exception("Won't work with cpt templates")
         elif type(ntemplate) == nx.DiGraph:
+            self.marginals = ntemplate.edges()
             self.ntemplate = np.array(nx.to_numpy_matrix(ntemplate), dtype=np.int32)
         self.ground = ground
-        self.prior_structural = prior_structural
+        self.p_struct = p_struct
+        self.p_cpd = p_cpd
         
     def copy(self):
         """ Create a copy of myself for suitable use later """
@@ -91,19 +98,26 @@ cdef class BayesNetSampler:
                 self.bayesnet.mat
         cdef np.ndarray[np.int32_t, ndim=2, mode="c"] ntemplate = \
                 self.ntemplate
-        cdef double priordiff = 0.0
-        cdef double cptaccum = 0.0
+
+        cdef double struct_accum = 0.0
+        cdef double cpd_accum = 0.0
+
         cdef int i,j
         cdef float e = self.bayesnet.energy()
-        for i in range(self.bayesnet.node_num):
-            for j in range(self.bayesnet.node_num):
-                if(j!=i):
-                    priordiff += abs(mat[j,i] - ntemplate[x[j],x[i]]) 
 
-        #for i in range(self.bayesnet.node_num):
-            #pass
+        if self.p_struct != 0.0:
+            for i in range(self.bayesnet.node_num):
+                for j in range(self.bayesnet.node_num):
+                    if(j!=i):
+                        struct_accum += abs(mat[j,i] - ntemplate[x[j],x[i]]) 
 
-        return (priordiff)*self.prior_structural + e
+        if self.p_cpd != 0.0:
+            for m in self.marginals:
+                cpd_accum += self.ground.factor_kld(self.bayesnet, m)
+
+        return self.p_struct * struct_accum \
+                + self.p_cpd * cpd_accum \
+                + e
 
     def propose(self):
         self.bayesnet.mutate()
@@ -564,6 +578,43 @@ cdef class BayesNetCPD:
             fac.set(i, newfac[i])
         self.fg.setFactor(node, fac)
         self.dirty = True
+
+    def factor_kld(self, BayesNetCPD other, object nodelist):
+
+        cdef Factor f1,f2
+        cdef int i
+        cdef double accum = 0.0
+        cdef VarSet vs
+        cdef PropertySet ps = PropertySet('[updates=HUGIN]')
+        for i in nodelist:
+            vs.insert(self.pnodes[i])
+
+        if self.dirty:
+            self.memo_entropy = self.entropy()
+        # Now we know our entropy AND our JTree are correct
+        
+        f1 = self.jtree.calcMarginal(vs)
+
+        other.jtree = JTree(other.fg, ps)
+        other.jtree.init()
+        other.jtree.run()
+
+        f2 = other.jtree.calcMarginal(vs)
+
+        f1.normalize()
+        f2.normalize()
+
+        for i in range(f1.nrStates()):
+            if f2[i] == 0.0:
+                if f1[i] == 0.0:
+                    pass
+                else:
+                    return np.inf
+            elif f1[i] == 0.0:
+                pass
+            else:
+                accum += f1[i] * log2(f1[i]/f2[i])
+        return accum
     
     def adjust_factor(self, int node, object addlist, object dellist, object undo=False):
         """ Adjust the factor according to the add list and delete list 

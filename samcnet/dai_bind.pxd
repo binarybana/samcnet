@@ -38,6 +38,7 @@ cdef extern from "dai/varset.h" namespace "dai":
         VarSet operator|(VarSet &)
         #VarSet& remove(VarSet &)
         #VarSet& add(VarSet &)
+    bint operator==(VarSet&, VarSet&)
 
 cdef extern from "dai/properties.h" namespace "dai":
     cdef cppclass PropertySet:

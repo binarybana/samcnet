@@ -1,21 +1,62 @@
 import os, sys, zlib, redis
 import pylab as p
+from matplotlib import rc
 import numpy as np
 import tables as t
 
-def sweep_plot(r, jobhash):
-    p.figure()
-    keystart = 'custom:%s:trunc=10:samplesize=' % jobhash
-    keys = r.keys(keystart + '*')
-    cut = len(keystart)
-    #filter(lambda x: x.startswith('samplesize'), s.split(':'))
-    positions = [int(x[cut:]) for x in keys] 
-    datasets = [map(float,r.lrange(x,0,-1)) for x in keys]
+rc('text', usetex=True)
 
-    p.boxplot(datasets, positions=positions, widths=4)
+#custom:3dabbb5ffad97a8d205a6b22bd9543f5c5a0e1b7:p_struct=15:ntemplate=4:p_cpd=0
+
+def sweep_plot(r, jobhashes):
+    def transform(s):
+        return dict([x.split('=') for x in s.split(':')])
+    def filt(crit, params, datasets):
+        for i,p in enumerate(params):
+            cp = dict([(k,int(v)) for k,v in p.iteritems()])
+            if cp == crit:
+                return i
+    params = []
+    datasets = []
+    for jobhash in jobhashes:
+        keystart = 'custom:%s:' % jobhash
+        cutlen = len(keystart)
+        keys = r.keys(keystart + '*')
+
+        params.extend([transform(x[cutlen:]) for x in keys])
+        datasets.extend([map(float,r.lrange(x,0,-1)) for x in keys])
+
+    pen = ['g','r','m','c']
+    x = [0.5,1.5,3.0,5.0,8.0,15.0,30.0]
+    for pristine_cpd in [0, 1]:
+        for numtemplate in [4,8]:
+            res = []
+            err = []
+            for p_struct in map(lambda t: int(t*10), x):
+                cpd = pristine_cpd * p_struct
+                ind = filt({'ntemplate':numtemplate,
+                        'p_cpd':cpd,
+                        'p_struct':p_struct},
+                        params, datasets)
+                res.append(np.median(datasets[ind]))
+                err.append(np.std(datasets[ind]))
+            p.errorbar(x,res,yerr=err,
+                    color=pen.pop(), 
+                    label='%s; $\,$ %d edges' % 
+                        (r'$\gamma_{\textrm{cpd}}=\gamma_{\textrm{structural}}$' if pristine_cpd else 
+                        r'$\gamma_{\textrm{cpd}}=0$',
+                        numtemplate),
+                    linewidth=2)
+    
+    #p.boxplot(datasets, positions=[int(x['p_struct'])/10. for x in params])
+
     p.grid(True)
-    p.xlim(0,170)
-    #p.legend()
+    p.legend(bbox_to_anchor=(.5,1), loc=2, fontsize=12)
+    #legend(bbox_to_anchor=(0, 0, 1, 1), bbox_transform=gcf().transFigure)
+    p.xlim(0,31)
+    p.xlabel(r'$\gamma_{\textrm{structural}}$')#,fontsize=20)
+    p.ylabel('Posterior average of KLD')
+    #p.ylim(0,5)
 
 def cummeans_plot(ax, filelist, node, ylabel=None):
     first = True
@@ -43,9 +84,11 @@ def cummeans_plot(ax, filelist, node, ylabel=None):
     ax.grid(True)
     ax.legend()
 
-def prompt_for_dataset(r):
+def prompt_for_dataset(r, n=[]):
     # Get all job hashes with results and sort by time submitted
     done_hashes = sorted(r.keys('jobs:done:*'), key=lambda x: int(r.hget('jobs:times', x[10:]) or '0'))
+    if n:
+        return [done_hashes[x][10:] for x in n]
     # Print results
     for i, d in enumerate(done_hashes):
         desc = r.hget('jobs:descs', d[10:]) or ''
@@ -101,7 +144,7 @@ def show_ground(r, jobhash):
 if __name__ == "__main__":
 
     r = redis.StrictRedis('localhost')
-    jobhash = prompt_for_dataset(r)
+    #jobhash = prompt_for_dataset(r)
 
     #basedir = '/tmp/samcfiles'
     #filelist = pull_data(r, basedir, jobhash)
@@ -128,6 +171,8 @@ if __name__ == "__main__":
 
     #print_h5_info(filelist[0])
 
-    sweep_plot(r, jobhash)
+    jobhashes = prompt_for_dataset(r, [25,26,27,28,29,30,31])
+    show_ground(r, jobhashes[0])
+    sweep_plot(r, jobhashes)
 
     p.show()
