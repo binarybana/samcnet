@@ -16,7 +16,6 @@ In a recent version of Ubuntu you'll need the following:
 sudo apt-get install cython python-pandas python-numpy python-scipy 
 python-networkx libboost-dev libboost-program-options-dev libboost-test-dev 
 libjudy-dev libgmp-dev
-```
 git clone git@github.com:binarybana/samcnet.git
 git submodule update --init
 cd deps/libdai
