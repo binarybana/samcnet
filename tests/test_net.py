@@ -30,8 +30,8 @@ def time():
         print("Time taken: {} seconds".format(t-start))
         start = None
 
-N = 8
-iters = 1e4
+N = 4
+iters = 1e3
 numdata = 20
 priorweight = 5.0
 numtemplate = 10
@@ -67,7 +67,7 @@ time()
 s.sample(iters, temperature)
 time()
 
-#s.compute_means()
+s.compute_means()
 
 #fname = '/tmp/test.h5'
 #fid = open(fname, 'w')
