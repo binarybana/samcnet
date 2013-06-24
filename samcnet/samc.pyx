@@ -174,7 +174,11 @@ cdef class SAMCRun:
             self.db.createGroup('/', 'computed', 'Computed quantities')
         if cummeans and not 'cummeans' in self.db.root.computed:
             cumgroup = self.db.createGroup('/computed', 'cummeans', 'Cumulative means')
-        if not 'means' in self.db.root.computed:
+        elif cummeans and 'cummeans' in self.db.root.computed:
+            cumgroup = self.db.root.computed.cummeans
+        if 'means' in self.db.root.computed:
+            meangroup = self.db.root.computed.means
+        else:
             meangroup = self.db.createGroup('/computed', 'means', 'Means')
         for item in self.db.walkNodes('/object'):
             if isinstance(item, t.array.Array):
@@ -191,8 +195,11 @@ cdef class SAMCRun:
                     meangroup._v_attrs[item.name] = arr[-1]
                 else:
                     denom = part.sum()
-                    numerator = (part * funcs).sum()
-                    meangroup._v_attrs[item.name] = float(numerator/denom)
+                    print("%s: after denom, shape: %s" % (str(item), str(denom.shape)))
+                    numerator = (part * funcs.T).T.sum(axis=0)
+                    print(" after numerator")
+                    meangroup._v_attrs[item.name] = (numerator/denom).astype(np.float)
+                    print(" after meangroup")
 
     def truncate_means(self, trunc):
         assert self.db != None, 'db not initialized'

@@ -13,7 +13,7 @@ import scipy
 from scipy.special import betaln
 
 from statsmodels.sandbox.distributions.mv_normal import MVT,MVNormal
-#from sklearn.qda import QDA
+#from sklearn.qda import QDA 
 
 #import sys
 #sys.path.append('/home/bana/GSP/research/samc/code')
@@ -281,59 +281,120 @@ class Johnson():
         root.objfxn.delta1.append((self.delta1,))
         root.objfxn.c.append((self.c,))
 
-class Classification():
-    def __init__(self):
-        seed = np.random.randint(10**6)
-        print "Seed is %d" % seed
-        np.random.seed(seed)
+class Classifier(object):
+    def __init__(self, dist0, dist1):
+        self.dist0 = dist0
+        self.dist1 = dist1
 
-        self.D = 2 # Dimension
-        self.n = 30 # Data points
+        assert(dist0.D == dist1.D)
+        self.D = dist0.D
+        self.n = dist0.n + dist1.n
+        pass
 
-        ##### Prior Values and Confidences ######
-        self.priorsigma0 = np.eye(self.D)*0.3
-        self.priorsigma1 = np.eye(self.D)*0.3
-        self.kappa0 = 6
-        self.kappa1 = 6
+    def predict(self, data):
+        """ Given data, return vector with predicted labels """
+        return map(self.predict_single, data)
 
-        self.priormu0 = np.zeros(self.D)
-        self.priormu1 = np.ones(self.D)*0.5
+    def error(self, data, labels):
+        """ Given data and true labels return (numcorrect, numwrong) """
+        difs = (self.predict(data) - labels).nonzero()[0].sum()
+        return (labels.shape[0] - difs, difs)
 
-        self.nu0 = 12.0
-        self.nu1 = 2.0
+class GaussianDist(object):
+    def __init__(self, truemu, truesigma, n, priormu, nu, kappa, S, alpha=1):
+        """ Initialize Gaussian distribution with data and priors
+        then calculate the analytic posterior """
+        self.truemu = truemu.copy()
+        self.truesigma = truesigma.copy()
 
-        self.alpha0 = 1.0
-        self.alpha1 = 1.0
+        self.n = n
+        self.data = self.gen_data(n)
 
-        #### Ground Truth Parameters 
-        c = 0.83 # Ground truth class marginal
+        self.priormu = priormu.copy()
+        self.nu = nu
+        self.kappa = kappa
+        self.S = S.copy()
+        self.alpha = alpha
+        self.D = self.data.shape[1]
 
-        sigma0 = sample_invwishart(self.priorsigma0, self.nu0)
-        sigma1 = sample_invwishart(self.priorsigma1, self.nu1)
+        self.train_analytic()
 
-        #mu0 = np.zeros(self.D)
-        #mu1 = np.ones(self.D)
-        mu0 = np.random.multivariate_normal(self.priormu0, sigma0/self.nu0, size=1)[0]
-        mu1 = np.random.multivariate_normal(self.priormu1, sigma1/self.nu1, size=1)[0]
+    def gen_data(self, n):
+        return np.random.multivariate_normal(self.truemu, self.truesigma, n)
 
-        ##### Record true values for plotting, comparison #######
-        self.true = {'c':c, 
-                'mu0': mu0.copy(), 
-                'sigma0': sigma0.copy(), 
-                'mu1': mu1.copy(), 
-                'sigma1': sigma1.copy(),
-                'seed': seed}
+    def train_analytic(self):
+        """ Calculating the analytic distribution posteriors given on page 15 of Lori's 
+        Optimal Classification eq 34. """
+        self.nustar = self.nu + self.n
 
-        self.n0 = st.binom.rvs(self.n, c)
-        self.n1 = self.n - self.n0
-        self.data = np.vstack(( \
-            np.random.multivariate_normal(mu0, sigma0, self.n0),
-            np.random.multivariate_normal(mu1, sigma1, self.n1) ))
+        samplemean = self.data.mean(axis=0)
+        samplecov = np.cov(self.data.T)
 
-        self.mask0 = np.hstack((
-            np.ones(self.n0, dtype=np.bool),
-            np.zeros(self.n1, dtype=np.bool)))
-        self.mask1 = np.logical_not(self.mask0)
+        self.mustar = (self.nu * self.priormu + self.n * samplemean) \
+                / (self.nu + self.n)
+        self.kappastar = self.kappa + self.n
+        self.Sstar = self.S + (self.n-1)*samplecov + self.nu*self.n/(self.nu+self.n)\
+                * np.outer((samplemean - self.priormu), (samplemean - self.priormu))
+                
+        # Now calculate effective class conditional densities from eq 55 page 21
+        self.fx = MVT(
+                self.mustar, 
+                (self.nustar+1)/(self.kappastar-self.D+1)/self.nustar * self.Sstar, 
+                self.kappastar - self.D + 1)
+
+    def eval_posterior(self, grid_n, grid):
+        return self.fx.logpdf(grid).reshape(grid_n, -1)
+
+    def eval_true(self, grid_n, grid):
+        return MVNormal(self.truemu, self.truesigma).logpdf(grid).reshape(grid_n, -1)
+
+class GaussianCls(Classifier):
+    def __init__(self, dist0, dist1, c=None):
+        """ Trains Classifier """
+        super(GaussianCls, self).__init__(dist0, dist1)
+        self.Ec = c or (self.dist0.n + self.dist0.alpha) / (self.n + self.dist0.alpha + self.dist1.alpha)
+        # Expectation of C from page 3 eq. 1 using beta conjugate prior
+        self.efactor = log(self.Ec) - log(1-self.Ec)
+
+    def predict_single(self, data):
+        if self.dist0.fx.logpdf(data) - self.dist1.fx.logpdf(data) + self.efactor > 0: 
+            return 0
+        else:
+            return 1
+        # TODO Might have these switched
+
+    def calc_densities(self, grid, n, record):
+        return (self.dist0.fx.logpdf(grid) - self.dist1.fx.logpdf(grid) + self.efactor).reshape(grid_n, -1)
+
+def gen_dists():
+    D = 2
+    priorsigma0 = np.eye(D)*0.3
+    priorsigma1 = np.eye(D)*0.3
+    nu0 = 12.0
+    nu1 = 2.0
+    kappa0 = 6.0
+    kappa1 = 6.0
+    
+    #### Ground Truth Parameters 
+    c = 0.83 # Ground truth class marginal
+    sigma0 = sample_invwishart(priorsigma0, nu0)
+    sigma1 = sample_invwishart(priorsigma1, nu1)
+    mu0 = np.zeros(D)
+    mu1 = np.ones(D)
+    #mu0 = np.random.multivariate_normal(self.priormu0, sigma0/self.nu0, size=1)[0]
+    #mu1 = np.random.multivariate_normal(self.priormu1, sigma1/self.nu1, size=1)[0]
+
+    ###########
+    n = 30
+    n0 = st.binom.rvs(n, c)
+    n1 = n - n0
+    dist0 = GaussianDist(mu0, sigma0, n0, mu0, nu0, kappa0, priorsigma0)
+    dist1 = GaussianDist(mu1, sigma1, n1, mu1, nu1, kappa1, priorsigma1)
+    return c, dist0, dist1
+
+class GaussianSampler(Classifier):
+    def __init__(self, dist0, dist1):
+        super(GaussianSampler, self).__init__(dist0, dist1)
 
         ##### Proposal variances ######
         self.propdof = 200
@@ -341,10 +402,10 @@ class Classification():
 
         ######## Starting point of MCMC Run #######
         self.c = np.random.rand()
-        self.mu0 = self.data[self.mask0].mean(axis=0)
-        self.mu1 = self.data[self.mask1].mean(axis=0)
-        self.sigma0 = sample_invwishart(self.priorsigma0, self.kappa0)
-        self.sigma1 = sample_invwishart(self.priorsigma1, self.kappa1)
+        self.mu0 = dist0.data.mean(axis=0)
+        self.mu1 = dist1.data.mean(axis=0)
+        self.sigma0 = sample_invwishart(self.dist0.S, self.dist0.kappa)
+        self.sigma1 = sample_invwishart(self.dist1.S, self.dist1.kappa)
 
         ###### Bookeeping ######
         self.oldmu0 = None
@@ -355,47 +416,6 @@ class Classification():
 
         self.mtype = ''
 
-        #### Calculating the Analytic solution given on page 15 of Lori's 
-        #### Optimal Classification eq 34.
-        self.nu0star = self.nu0 + self.n0
-        self.nu1star = self.nu1 + self.n1
-
-        sample0mean = self.data[self.mask0].mean(axis=0)
-        sample1mean = self.data[self.mask1].mean(axis=0)
-        sample0cov = np.cov(self.data[self.mask0].T)
-        sample1cov = np.cov(self.data[self.mask1].T)
-
-        self.mu0star = (self.nu0*self.priormu0 + self.n0 * sample0mean) \
-                / (self.nu0 + self.n0)
-        self.mu1star = (self.nu1*self.priormu1 + self.n1 * sample1mean ) \
-                / (self.nu1 + self.n1)
-
-        self.kappa0star = self.kappa0 + self.n0
-        self.kappa1star = self.kappa1 + self.n1
-
-        self.S0star = self.priorsigma0 + (self.n0-1)*sample0cov + self.nu0*self.n0/(self.nu0+self.nu0)\
-                * np.outer((sample0mean - self.priormu0), (sample0mean - self.priormu0))
-        self.S1star = self.priorsigma1 + (self.n1-1)*sample1cov + self.nu1*self.n1/(self.nu1+self.nu1)\
-                * np.outer((sample1mean - self.priormu1), (sample1mean - self.priormu1))
-                
-        #### Now calculate effective class conditional densities from eq 55
-        #### page 21
-
-        self.fx0 = MVT(
-                self.mu0star, 
-                (self.nu0star+1)/(self.kappa0star-self.D+1)/self.nu0star * self.S0star, 
-                self.kappa0star - self.D + 1)
-        self.fx1 = MVT(
-                self.mu1star, 
-                (self.nu1star+1)/(self.kappa1star-self.D+1)/self.nu1star * self.S1star, 
-                self.kappa1star - self.D + 1)
-        self.Ec = (self.n0 + self.alpha0) / (self.n + self.alpha0 + self.alpha1)
-
-        self.analytic = {'c': self.Ec,
-                        'mu0': self.mu0star,
-                        'mu1': self.mu1star}
-
-
     def propose(self):
         self.oldmu0 = self.mu0.copy()
         self.oldmu1 = self.mu1.copy()
@@ -404,10 +424,10 @@ class Classification():
         self.oldc = self.c
 
         if np.random.rand() < 0.01: # Random restart
-            self.mu0 = self.data[self.mask0].mean(axis=0)
-            self.mu1 = self.data[self.mask1].mean(axis=0)
-            self.sigma0 = sample_invwishart(self.priorsigma0, self.kappa0)
-            self.sigma1 = sample_invwishart(self.priorsigma1, self.kappa1)
+            self.mu0 = self.dist0.data.mean(axis=0)
+            self.mu1 = self.dist1.data.mean(axis=0)
+            self.sigma0 = sample_invwishart(self.dist0.S, self.dist0.kappa)
+            self.sigma1 = sample_invwishart(self.dist1.S, self.dist1.kappa)
         else:
             self.mu0 += (np.random.rand(self.D)-0.5)*self.propmu
             self.mu1 += (np.random.rand(self.D)-0.5)*self.propmu
@@ -435,24 +455,25 @@ class Classification():
     def energy(self):
         sum = 0.0
         #class 0 negative log likelihood
-        points = self.data[self.mask0]
+        points = self.dist0.data
         if points.size > 0:
             sum -= logp_normal(points, self.mu0, self.sigma0).sum()
 
         #class 1 negative log likelihood
-        points = self.data[self.mask1]
+        points = self.dist1.data
         if points.size > 0:
             sum -= logp_normal(points, self.mu1, self.sigma1).sum()
                 
         #Class proportion c (from page 3, eq 1)
-        sum -= log(self.c)*(self.alpha0+self.n0-1) + log(1-self.c)*(self.alpha1+self.n1-1) \
-                - betaln(self.alpha0 + self.n0, self.alpha1 + self.n1)
+        sum -= log(self.c)*(self.dist0.alpha+self.dist0.n-1) \
+                + log(1-self.c)*(self.dist1.alpha+self.dist1.n-1) \
+                - betaln(self.dist0.alpha + self.dist0.n, self.dist1.alpha + self.dist1.n)
 
         #Now add in the priors...
-        sum -= logp_invwishart(self.sigma0,self.kappa0,self.priorsigma0)
-        sum -= logp_invwishart(self.sigma1,self.kappa1,self.priorsigma1)
-        sum -= logp_normal(self.mu0, self.priormu0, self.sigma0, self.nu0)
-        sum -= logp_normal(self.mu1, self.priormu1, self.sigma1, self.nu1)
+        sum -= logp_invwishart(self.sigma0, self.dist0.kappa, self.dist0.S)
+        sum -= logp_invwishart(self.sigma1, self.dist1.kappa, self.dist1.S)
+        sum -= logp_normal(self.mu0, self.dist0.priormu, self.sigma0, self.dist0.nu)
+        sum -= logp_normal(self.mu1, self.dist1.priormu, self.sigma1, self.dist1.nu)
 
         return sum
 
@@ -471,7 +492,7 @@ class Classification():
         db.createEArray(objroot.objfxn, 'sigma0', t.Float64Atom(shape=(2,2)), (0,), expectedrows=size)
         db.createEArray(objroot.objfxn, 'sigma1', t.Float64Atom(shape=(2,2)), (0,), expectedrows=size)
         db.createEArray(objroot.objfxn, 'c', t.Float64Atom(), (0,), expectedrows=size)
-        objroot._v_attrs.true_dict = self.true
+        #objroot._v_attrs.true_dict = self.true
         #temp = {}
         #temp['entropy'] = 'Entropy in bits'
         #temp['kld']  = 'KL-Divergence from true network in bits'
@@ -489,133 +510,116 @@ class Classification():
         root.objfxn.sigma1.append((self.sigma1,))
         root.objfxn.c.append((self.c,))
 
-    def get_grid(self):
-        samples = np.vstack((self.draw_from_true(0), self.draw_from_true(1)))
-        n = 30
-        lx,hx,ly,hy = np.vstack((samples.min(axis=0), samples.max(axis=0))).T.flatten()
-        xspread, yspread = hx-lx, hy-ly
-        lx -= xspread * 0.2
-        hx += xspread * 0.2
-        ly -= yspread * 0.2
-        hy += yspread * 0.2
-        gextent = (lx,hx,ly,hy)
-        grid = np.dstack(np.meshgrid(
-                        np.linspace(lx,hx,n),
-                        np.linspace(ly,hy,n))).reshape(-1,2)
-        return n, gextent, grid
+def get_grid(cls):
+    samples = np.vstack((cls.dist0.gen_data(30), cls.dist1.gen_data(30)))
+    lx,hx,ly,hy = np.vstack((samples.min(axis=0), samples.max(axis=0))).T.flatten()
+    xspread, yspread = hx-lx, hy-ly
+    n = 30
+    lx -= xspread * 0.2
+    hx += xspread * 0.2
+    ly -= yspread * 0.2
+    hy += yspread * 0.2
+    gextent = (lx,hx,ly,hy)
+    grid = np.dstack(np.meshgrid(
+                    np.linspace(lx,hx,n),
+                    np.linspace(ly,hy,n))).reshape(-1,2)
+    return n, gextent, grid
 
-    def calc_analytic(self, grid_n, grid):
-        # Expectation of C from page 3 eq. 1 using beta conjugate prior
-        ag = (self.fx0.logpdf(grid) - self.fx1.logpdf(grid) \
-                + log(self.Ec) - log(1-self.Ec)).reshape(grid_n,-1)
-        afx0 = self.fx0.logpdf(grid).reshape(grid_n, -1)
-        afx1 = self.fx1.logpdf(grid).reshape(grid_n, -1)
-        return afx0, afx1, ag
+#def calc_gavg(cmean,fx0avg,fx1avg):
+    #return fx0avg*cmean / (fx1avg*(1-cmean))
 
-    def draw_from_true(self, cls, n=100):
-        if cls == 0:
-            mu = self.true['mu0']
-            sigma = self.true['sigma0']
-        else:
-            mu = self.true['mu1']
-            sigma = self.true['sigma1']
-        return np.random.multivariate_normal(mu, sigma, n)
+#def plot_run(c, db):
+    ## Plot the data
+    #p.figure()
+    #splot = p.subplot(2,2,1)
+    #p.title('Data')
+    #p.grid(True)
 
-def calc_gavg(cmean,fx0avg,fx1avg):
-    return fx0avg*cmean / (fx1avg*(1-cmean))
+    ## Data Plot
+    #p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.', label='class 0')
+    #p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.', label='class 1')
+    #p.legend(loc='best')
+    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
-def plot_run(c, db):
-    # Plot the data
-    p.figure()
-    splot = p.subplot(2,2,1)
-    p.title('Data')
-    p.grid(True)
+    ## MCMC Mean Samples Plot
+    #splot = p.subplot(2,2,2, sharex=splot, sharey=splot)
+    #p.grid(True)
+    #p.title('MCMC Mean Samples')
 
-    # Data Plot
-    p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.', label='class 0')
-    p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.', label='class 1')
-    p.legend(loc='best')
-    plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+    #p.plot(np.vstack(db['mu0'])[:,0], np.vstack(db['mu0'])[:,1], 'r.', alpha=0.3)
+    #p.plot(np.vstack(db['mu1'])[:,0], np.vstack(db['mu1'])[:,1], 'g.', alpha=0.3)
 
-    # MCMC Mean Samples Plot
-    splot = p.subplot(2,2,2, sharex=splot, sharey=splot)
-    p.grid(True)
-    p.title('MCMC Mean Samples')
+    #mu0mean = np.vstack(db['mu0']).mean(axis=0)
+    #mu1mean = np.vstack(db['mu1']).mean(axis=0)
 
-    plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
-    p.plot(np.vstack(db['mu0'])[:,0], np.vstack(db['mu0'])[:,1], 'r.', alpha=0.3)
-    p.plot(np.vstack(db['mu1'])[:,0], np.vstack(db['mu1'])[:,1], 'g.', alpha=0.3)
+    #p.plot(mu0mean[0], mu0mean[1], 'ro', markersize=5)
+    #p.plot(mu1mean[0], mu0mean[1], 'go', markersize=5)
 
-    mu0mean = np.vstack(db['mu0']).mean(axis=0)
-    mu1mean = np.vstack(db['mu1']).mean(axis=0)
-
-    p.plot(mu0mean[0], mu0mean[1], 'ro', markersize=5)
-    p.plot(mu1mean[0], mu0mean[1], 'go', markersize=5)
-
-    ############ Plot Gavg from mcmc samples
-    grid_n, extent, grid = c.get_grid()
-    cmean, fx0avg, fx1avg = c.estimate_sample_means(grid_n, grid, db) 
-    afx0, afx1, agavg = c.calc_analytic(grid_n, grid)
+    ############# Plot Gavg from mcmc samples
+    #grid_n, extent, grid = c.get_grid()
+    #cmean, fx0avg, fx1avg = c.estimate_sample_means(grid_n, grid, db) 
+    #afx0, afx1, agavg = c.calc_analytic(grid_n, grid)
     
-    splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
-    gmin, gmax = agavg.min(), agavg.max()
-    gavg = np.clip(calc_gavg(cmean, fx0avg, fx1avg), np.exp(gmin), np.exp(gmax))
-    p.imshow(np.log(gavg), extent=extent, origin='lower')
-    p.colorbar()
-    p.contour(np.log(gavg), [0.0], extent=extent, origin='lower', cmap = p.cm.gray)
+    #splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
+    #gmin, gmax = agavg.min(), agavg.max()
+    #gavg = np.clip(calc_gavg(cmean, fx0avg, fx1avg), np.exp(gmin), np.exp(gmax))
+    #p.imshow(np.log(gavg), extent=extent, origin='lower')
+    #p.colorbar()
+    #p.contour(np.log(gavg), [0.0], extent=extent, origin='lower', cmap = p.cm.gray)
 
-    p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.')
-    p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.')
-    plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+    #p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.')
+    #p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.')
+    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
-    ############ Plot analytic G function
-    splot = p.subplot(2,2,4, sharex=splot, sharey=splot)
-    p.imshow(agavg, extent=extent, origin='lower')
-    p.colorbar()
-    p.contour(agavg, [0.0], extent=extent, origin='lower', cmap = p.cm.gray)
-    p.contour(np.log(gavg), [0.0], extent=extent, origin='lower', cmap = p.cm.gray,
-            linestyles='dotted')
+    ############# Plot analytic G function
+    #splot = p.subplot(2,2,4, sharex=splot, sharey=splot)
+    #p.imshow(agavg, extent=extent, origin='lower')
+    #p.colorbar()
+    #p.contour(agavg, [0.0], extent=extent, origin='lower', cmap = p.cm.gray)
+    #p.contour(np.log(gavg), [0.0], extent=extent, origin='lower', cmap = p.cm.gray,
+            #linestyles='dotted')
 
-    p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.')
-    p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.')
+    #p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.')
+    #p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.')
 
-    plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
+    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
+    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
-def plot_cross(c,db,ind=None):
-    grid_n, extent, grid = c.get_grid()
-    cmean, fx0avg, fx1avg = c.estimate_sample_means(grid_n, grid, db) 
-    afx0, afx1, agavg = c.calc_analytic(grid_n, grid)
-    p.figure()
-    x = grid[:grid_n,0]
-    p.subplot(3,1,1)
-    i0 = np.argmax(afx0.sum(axis=1))
-    i1 = np.argmax(afx1.sum(axis=1))
+#def plot_cross(c,db,ind=None):
+    #grid_n, extent, grid = c.get_grid()
+    #cmean, fx0avg, fx1avg = c.estimate_sample_means(grid_n, grid, db) 
+    #afx0, afx1, agavg = c.calc_analytic(grid_n, grid)
+    #p.figure()
+    #x = grid[:grid_n,0]
+    #p.subplot(3,1,1)
+    #i0 = np.argmax(afx0.sum(axis=1))
+    #i1 = np.argmax(afx1.sum(axis=1))
 
-    p.plot(x,afx0[i0,:], 'r',label='analyticfx0')
-    p.plot(x,np.log(fx0avg[i0,:]), 'g', label='avgfx0')
-    p.xlabel('slice at index %d from bottom' % i0)
-    p.legend(loc='best')
-    p.grid(True)
-    p.subplot(3,1,2)
-    p.plot(x,afx1[i1,:], 'r',label='analyticfx1')
-    p.plot(x,np.log(fx1avg[i1,:]), 'g', label='avgfx1')
-    p.xlabel('slice at index %d from bottom' % i1)
-    p.legend(loc='best')
-    p.grid(True)
+    #p.plot(x,afx0[i0,:], 'r',label='analyticfx0')
+    #p.plot(x,np.log(fx0avg[i0,:]), 'g', label='avgfx0')
+    #p.xlabel('slice at index %d from bottom' % i0)
+    #p.legend(loc='best')
+    #p.grid(True)
+    #p.subplot(3,1,2)
+    #p.plot(x,afx1[i1,:], 'r',label='analyticfx1')
+    #p.plot(x,np.log(fx1avg[i1,:]), 'g', label='avgfx1')
+    #p.xlabel('slice at index %d from bottom' % i1)
+    #p.legend(loc='best')
+    #p.grid(True)
 
-    p.subplot(3,1,3)
-    ind = ind if ind else (i0+i1)/2
-    p.plot(x,log(cmean)+np.log(fx0avg)[ind,:], 'r', label='avg0')
-    p.plot(x,log(c.Ec)+afx0[ind,:], 'r--',label='true0')
-    p.plot(x,log(1-cmean)+np.log(fx1avg)[ind,:], 'g', label='avg0')
-    p.plot(x,log(1-c.Ec)+afx1[ind,:], 'g--',label='true1')
-    p.xlabel('slice at index %d from bottom' % ind)
-    p.legend(loc='best')
-    p.grid(True)
+    #p.subplot(3,1,3)
+    #ind = ind if ind else (i0+i1)/2
+    #p.plot(x,log(cmean)+np.log(fx0avg)[ind,:], 'r', label='avg0')
+    #p.plot(x,log(c.Ec)+afx0[ind,:], 'r--',label='true0')
+    #p.plot(x,log(1-cmean)+np.log(fx1avg)[ind,:], 'g', label='avg0')
+    #p.plot(x,log(1-c.Ec)+afx1[ind,:], 'g--',label='true1')
+    #p.xlabel('slice at index %d from bottom' % ind)
+    #p.legend(loc='best')
+    #p.grid(True)
 
 #def plot_eff(c):
     #p.figure()
@@ -647,26 +651,49 @@ def plot_ellipse(splot, mean, cov, color):
     splot.add_artist(ell)
 
 if __name__ == '__main__':
-    j = Johnson()
-    for i in range(20):
-        j.propose()
-        print j.energy()
+    import samc
+    import pylab as p
 
-    n, (l,h), line = j.get_grid()
-    print l,h
-    print line
-    lp0,lp1 = j.calc_densities(line)
-    tlp0,tlp1 = j.true_densities(line)
-    p.subplot(2,1,1)
-    p.plot(line, lp0, 'g', line, tlp0, 'g--')
-    p.plot(line, lp1, 'm', line, tlp1, 'm--')
-    p.plot(j.data[j.mask0], np.zeros_like(j.data[j.mask0]), 'go')
-    p.plot(j.data[j.mask1], np.zeros_like(j.data[j.mask1]), 'mo')
+    #seed = np.random.randint(10**6)
+    seed = 32
+    print "Seed is %d" % seed
+    np.random.seed(seed)
 
-    p.subplot(2,1,2)
-    p.plot(line, np.exp(lp0), 'g', line, np.exp(tlp0), 'g--')
-    p.plot(line, np.exp(lp1), 'm', line, np.exp(tlp1), 'm--')
-    p.plot(j.data[j.mask0], np.zeros_like(j.data[j.mask0]), 'go')
-    p.plot(j.data[j.mask1], np.zeros_like(j.data[j.mask1]), 'mo')
+    ## First generate true distributions and data
+    c, dist0, dist1 = gen_dists()
+
+    ## Now test Gaussian Analytic calculation
+    gc = GaussianCls(dist0, dist1)
+
+    c = GaussianSampler(dist0,dist1)
+    s = samc.SAMCRun(c, burn=1e2, stepscale=1000, refden=1, thin=10)
+    s.sample(2e3, temperature=1)
+
+    s.compute_means(False)
+
+    n, gextent, grid = get_grid(gc)
+    #lp0,lp1 = j.calc_densities(line)
+    #tlp0,tlp1 = j.true_densities(line)
+    sp = p.subplot(2,2,1)
+    p.axis(gextent)
+    plot_ellipse(sp, dist0.truemu, dist0.truesigma, 'green')
+    plot_ellipse(sp, dist1.truemu, dist1.truesigma, 'red')
+
+    p.plot(dist0.data[:,0], dist0.data[:,1], 'go')
+    p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
+
+    p.subplot(2,2,2)
+    p.axis(gextent)
+    p.plot(dist0.data[:,0], dist0.data[:,1], 'go')
+    p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
+
+    p0 = dist0.eval_posterior(n, grid)
+    p1 = dist1.eval_posterior(n, grid)
+    p.imshow(p0-p1+gc.efactor, extent=gextent, origin='lower')
+    p.colorbar()
+    p.contour(p0-p1+gc.efactor, [0.0], extent=gextent, origin='lower', cmap = p.cm.gray)
+
+    p.subplot(2,2,3)
+
     p.show()
 
