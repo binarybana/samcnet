@@ -195,11 +195,8 @@ cdef class SAMCRun:
                     meangroup._v_attrs[item.name] = arr[-1]
                 else:
                     denom = part.sum()
-                    print("%s: after denom, shape: %s" % (str(item), str(denom.shape)))
                     numerator = (part * funcs.T).T.sum(axis=0)
-                    print(" after numerator")
                     meangroup._v_attrs[item.name] = (numerator/denom).astype(np.float)
-                    print(" after meangroup")
 
     def truncate_means(self, trunc):
         assert self.db != None, 'db not initialized'

@@ -342,11 +342,17 @@ class GaussianDist(object):
                 (self.nustar+1)/(self.kappastar-self.D+1)/self.nustar * self.Sstar, 
                 self.kappastar - self.D + 1)
 
-    def eval_posterior(self, grid_n, grid):
+    def eval_posterior(self, pts):
+        return self.fx.logpdf(pts)
+
+    def eval_posterior_grid(self, grid_n, grid):
         return self.fx.logpdf(grid).reshape(grid_n, -1)
 
-    def eval_true(self, grid_n, grid):
-        return MVNormal(self.truemu, self.truesigma).logpdf(grid).reshape(grid_n, -1)
+    def eval_true_grid(self, grid_n, grid):
+        return self.eval_true(grid).reshape(grid_n, -1)
+
+    def eval_true(self, pts):
+        return logp_normal(pts, self.truemu, self.truesigma)
 
 class GaussianCls(Classifier):
     def __init__(self, dist0, dist1, c=None):
@@ -366,10 +372,25 @@ class GaussianCls(Classifier):
     def calc_densities(self, grid, n, record):
         return (self.dist0.fx.logpdf(grid) - self.dist1.fx.logpdf(grid) + self.efactor).reshape(grid_n, -1)
 
+    def approx_error(self, errtype, c):
+        N = 10000
+        pts0 = self.dist0.gen_data(N)
+        pts1 = self.dist1.gen_data(N)
+        if errtype == "bayes":
+            err0 = self.dist0.eval_true(pts0) < self.dist1.eval_true(pts0)
+            err1 = self.dist0.eval_true(pts1) > self.dist1.eval_true(pts1)
+        else:
+            err0 = self.dist0.eval_posterior(pts0) < self.dist1.eval_posterior(pts0)
+            err1 = self.dist0.eval_posterior(pts1) > self.dist1.eval_posterior(pts1)
+
+        print("%d %d errors" %(err0.sum(), err1.sum()))
+
+        return (err0.sum()*c + err1.sum()*(1-c))/N
+
 def gen_dists():
     D = 2
-    priorsigma0 = np.eye(D)*0.3
-    priorsigma1 = np.eye(D)*0.3
+    priorsigma0 = np.eye(D)*5.3
+    priorsigma1 = np.eye(D)*5.3
     nu0 = 12.0
     nu1 = 2.0
     kappa0 = 6.0
@@ -377,6 +398,7 @@ def gen_dists():
     
     #### Ground Truth Parameters 
     c = 0.83 # Ground truth class marginal
+    #c = 0.5 # Ground truth class marginal
     sigma0 = sample_invwishart(priorsigma0, nu0)
     sigma1 = sample_invwishart(priorsigma1, nu1)
     mu0 = np.zeros(D)
@@ -477,11 +499,6 @@ class GaussianSampler(Classifier):
 
         return sum
 
-    def calc_densities(self, grid, n, record):
-        fx0 = np.exp(logp_normal(grid, record['mu0'], record['sigma0'])).reshape(n,n)
-        fx1 = np.exp(logp_normal(grid, record['mu1'], record['sigma1'])).reshape(n,n)
-        return (fx0, fx1)
-
     def init_db(self, db, size):
         """ Takes a Pytables Group object (group) and the total number of samples expected and
         expands or creates the necessary groups.
@@ -510,6 +527,29 @@ class GaussianSampler(Classifier):
         root.objfxn.sigma1.append((self.sigma1,))
         root.objfxn.c.append((self.c,))
 
+def calc_gavg(db, pts, partial=False):
+    of = db.root.object.objfxn
+    temp = db.root.samc.theta_trace.read()
+    parts = np.exp(temp - temp.max())
+    if partial:
+        inds = np.argsort(parts)[::-1][:partial]
+        g0 = calc_g(pts, parts[inds], of.mu0.read()[inds], of.sigma0.read()[inds])
+        g1 = calc_g(pts, parts[inds], of.mu1.read()[inds], of.sigma1.read()[inds])
+        Ec = of.c.read()[inds].mean()
+    else:
+        g0 = calc_g(pts, parts, of.mu0.read(), of.sigma0.read())
+        g1 = calc_g(pts, parts, of.mu1.read(), of.sigma1.read())
+        Ec = of.c.read().mean()
+    efactor = log(Ec) - log(1-Ec)
+    return g0 - g1 + efactor
+
+def calc_g(pts, parts, mus, sigmas):
+    """ Returns weighted (parts) average logp for all pts """
+    res = np.zeros(pts.shape[0])
+    for i in range(parts.size):
+        res += parts[i] * np.exp(logp_normal(pts, mus[i], sigmas[i]))
+    return np.log(res / parts.sum())
+
 def get_grid(cls):
     samples = np.vstack((cls.dist0.gen_data(30), cls.dist1.gen_data(30)))
     lx,hx,ly,hy = np.vstack((samples.min(axis=0), samples.max(axis=0))).T.flatten()
@@ -524,119 +564,6 @@ def get_grid(cls):
                     np.linspace(lx,hx,n),
                     np.linspace(ly,hy,n))).reshape(-1,2)
     return n, gextent, grid
-
-#def calc_gavg(cmean,fx0avg,fx1avg):
-    #return fx0avg*cmean / (fx1avg*(1-cmean))
-
-#def plot_run(c, db):
-    ## Plot the data
-    #p.figure()
-    #splot = p.subplot(2,2,1)
-    #p.title('Data')
-    #p.grid(True)
-
-    ## Data Plot
-    #p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.', label='class 0')
-    #p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.', label='class 1')
-    #p.legend(loc='best')
-    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
-
-    ## MCMC Mean Samples Plot
-    #splot = p.subplot(2,2,2, sharex=splot, sharey=splot)
-    #p.grid(True)
-    #p.title('MCMC Mean Samples')
-
-    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
-    #p.plot(np.vstack(db['mu0'])[:,0], np.vstack(db['mu0'])[:,1], 'r.', alpha=0.3)
-    #p.plot(np.vstack(db['mu1'])[:,0], np.vstack(db['mu1'])[:,1], 'g.', alpha=0.3)
-
-    #mu0mean = np.vstack(db['mu0']).mean(axis=0)
-    #mu1mean = np.vstack(db['mu1']).mean(axis=0)
-
-    #p.plot(mu0mean[0], mu0mean[1], 'ro', markersize=5)
-    #p.plot(mu1mean[0], mu0mean[1], 'go', markersize=5)
-
-    ############# Plot Gavg from mcmc samples
-    #grid_n, extent, grid = c.get_grid()
-    #cmean, fx0avg, fx1avg = c.estimate_sample_means(grid_n, grid, db) 
-    #afx0, afx1, agavg = c.calc_analytic(grid_n, grid)
-    
-    #splot = p.subplot(2,2,3, sharex=splot, sharey=splot)
-    #gmin, gmax = agavg.min(), agavg.max()
-    #gavg = np.clip(calc_gavg(cmean, fx0avg, fx1avg), np.exp(gmin), np.exp(gmax))
-    #p.imshow(np.log(gavg), extent=extent, origin='lower')
-    #p.colorbar()
-    #p.contour(np.log(gavg), [0.0], extent=extent, origin='lower', cmap = p.cm.gray)
-
-    #p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.')
-    #p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.')
-    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
-
-    ############# Plot analytic G function
-    #splot = p.subplot(2,2,4, sharex=splot, sharey=splot)
-    #p.imshow(agavg, extent=extent, origin='lower')
-    #p.colorbar()
-    #p.contour(agavg, [0.0], extent=extent, origin='lower', cmap = p.cm.gray)
-    #p.contour(np.log(gavg), [0.0], extent=extent, origin='lower', cmap = p.cm.gray,
-            #linestyles='dotted')
-
-    #p.plot(c.data[c.mask0,0], c.data[c.mask0,1], 'r.')
-    #p.plot(c.data[c.mask1,0], c.data[c.mask1,1], 'g.')
-
-    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
-
-#def plot_cross(c,db,ind=None):
-    #grid_n, extent, grid = c.get_grid()
-    #cmean, fx0avg, fx1avg = c.estimate_sample_means(grid_n, grid, db) 
-    #afx0, afx1, agavg = c.calc_analytic(grid_n, grid)
-    #p.figure()
-    #x = grid[:grid_n,0]
-    #p.subplot(3,1,1)
-    #i0 = np.argmax(afx0.sum(axis=1))
-    #i1 = np.argmax(afx1.sum(axis=1))
-
-    #p.plot(x,afx0[i0,:], 'r',label='analyticfx0')
-    #p.plot(x,np.log(fx0avg[i0,:]), 'g', label='avgfx0')
-    #p.xlabel('slice at index %d from bottom' % i0)
-    #p.legend(loc='best')
-    #p.grid(True)
-    #p.subplot(3,1,2)
-    #p.plot(x,afx1[i1,:], 'r',label='analyticfx1')
-    #p.plot(x,np.log(fx1avg[i1,:]), 'g', label='avgfx1')
-    #p.xlabel('slice at index %d from bottom' % i1)
-    #p.legend(loc='best')
-    #p.grid(True)
-
-    #p.subplot(3,1,3)
-    #ind = ind if ind else (i0+i1)/2
-    #p.plot(x,log(cmean)+np.log(fx0avg)[ind,:], 'r', label='avg0')
-    #p.plot(x,log(c.Ec)+afx0[ind,:], 'r--',label='true0')
-    #p.plot(x,log(1-cmean)+np.log(fx1avg)[ind,:], 'g', label='avg0')
-    #p.plot(x,log(1-c.Ec)+afx1[ind,:], 'g--',label='true1')
-    #p.xlabel('slice at index %d from bottom' % ind)
-    #p.legend(loc='best')
-    #p.grid(True)
-
-#def plot_eff(c):
-    #p.figure()
-    #splot = p.subplot(2,1,1)
-    #p.imshow(np.log(c.fx0avg), extent=c.gextent, origin='lower')
-    #p.title('fx0')
-    #p.colorbar()
-    #p.plot(c.data[np.arange(c.n0),0], c.data[np.arange(c.n0),1], 'r.')
-    #plot_ellipse(splot, c.true['mu0'], c.true['sigma0'], 'red')
-
-    #############
-    #splot = p.subplot(2,1,2, sharex=splot, sharey=splot)
-    #p.imshow(np.log(c.fx1avg), extent=c.gextent, origin='lower')
-    #p.colorbar()
-    #p.title('fx1')
-    #p.plot(c.data[np.arange(c.n0,c.n),0], c.data[np.arange(c.n0,c.n),1], 'g.')
-    #plot_ellipse(splot, c.true['mu1'], c.true['sigma1'], 'green')
 
 def plot_ellipse(splot, mean, cov, color):
     v, w = np.linalg.eigh(cov)
@@ -653,9 +580,10 @@ def plot_ellipse(splot, mean, cov, color):
 if __name__ == '__main__':
     import samc
     import pylab as p
+    p.close('all')
 
-    #seed = np.random.randint(10**6)
-    seed = 32
+    seed = np.random.randint(10**6)
+    #seed = 32
     print "Seed is %d" % seed
     np.random.seed(seed)
 
@@ -665,11 +593,14 @@ if __name__ == '__main__':
     ## Now test Gaussian Analytic calculation
     gc = GaussianCls(dist0, dist1)
 
-    c = GaussianSampler(dist0,dist1)
-    s = samc.SAMCRun(c, burn=1e2, stepscale=1000, refden=1, thin=10)
-    s.sample(2e3, temperature=1)
+    print("Bayes error:    %f" % gc.approx_error("bayes", c))
+    print("Cls true error: %f" % gc.approx_error("true", c))
 
-    s.compute_means(False)
+    #c = GaussianSampler(dist0,dist1)
+    #s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=1, thin=10)
+    #s.sample(1e3, temperature=1)
+
+    #s.compute_means(False)
 
     n, gextent, grid = get_grid(gc)
     #lp0,lp1 = j.calc_densities(line)
@@ -683,17 +614,30 @@ if __name__ == '__main__':
     p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
 
     p.subplot(2,2,2)
-    p.axis(gextent)
     p.plot(dist0.data[:,0], dist0.data[:,1], 'go')
     p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
 
-    p0 = dist0.eval_posterior(n, grid)
-    p1 = dist1.eval_posterior(n, grid)
+    p0 = dist0.eval_posterior_grid(n, grid)
+    p1 = dist1.eval_posterior_grid(n, grid)
     p.imshow(p0-p1+gc.efactor, extent=gextent, origin='lower')
     p.colorbar()
     p.contour(p0-p1+gc.efactor, [0.0], extent=gextent, origin='lower', cmap = p.cm.gray)
 
-    p.subplot(2,2,3)
+    #p.subplot(2,2,3)
+    #gavg = calc_gavg(s.db, grid).reshape(-1, n)
+    #p.plot(dist0.data[:,0], dist0.data[:,1], 'go')
+    #p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
+    #p.imshow(gavg, extent=gextent, origin='lower')
+    #p.colorbar()
+    #p.contour(gavg, [0.0], extent=gextent, origin='lower', cmap = p.cm.gray)
+
+    #p.subplot(2,2,4)
+    #gavg = calc_gavg(s.db, grid, 5).reshape(-1, n)
+    #p.plot(dist0.data[:,0], dist0.data[:,1], 'go')
+    #p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
+    #p.imshow(gavg, extent=gextent, origin='lower')
+    #p.colorbar()
+    #p.contour(gavg, [0.0], extent=gextent, origin='lower', cmap = p.cm.gray)
 
     p.show()
 
