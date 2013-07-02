@@ -373,30 +373,29 @@ class GaussianCls(Classifier):
     def calc_densities(self, grid, n, record):
         return (self.dist0.fx.logpdf(grid) - self.dist1.fx.logpdf(grid) + self.efactor).reshape(grid_n, -1)
 
-    def approx_error(self, errtype, c):
-        N = 50000
-        pts0 = self.dist0.gen_data(N)
-        pts1 = self.dist1.gen_data(N)
+    def approx_error(self, errtype, c, N=50000):
+        pts0 = self.dist0.gen_data(int(N*c))
+        pts1 = self.dist1.gen_data(int(N*(1-c)))
         if errtype == "bayes":
-            err0 = self.dist0.eval_true(pts0) < self.dist1.eval_true(pts0)
-            err1 = self.dist0.eval_true(pts1) > self.dist1.eval_true(pts1)
+            err0 = self.dist0.eval_true(pts0) - self.dist1.eval_true(pts0) + log(c) - log(1-c) < 0
+            err1 = self.dist0.eval_true(pts1) - self.dist1.eval_true(pts1) + log(c) - log(1-c) > 0
         else:
-            err0 = self.dist0.eval_posterior(pts0) < self.dist1.eval_posterior(pts0)
-            err1 = self.dist0.eval_posterior(pts1) > self.dist1.eval_posterior(pts1)
-        return (err0.sum()*c + err1.sum()*(1-c))/N
+            err0 = self.dist0.eval_posterior(pts0) - self.dist1.eval_posterior(pts0) + self.efactor < 0
+            err1 = self.dist0.eval_posterior(pts1) - self.dist1.eval_posterior(pts1) + self.efactor > 0
+        return (err0.sum() + err1.sum())/N
 
 def gen_dists():
     D = 2
-    priorsigma0 = np.eye(D)*0.3
-    priorsigma1 = np.eye(D)*0.3
+    priorsigma0 = np.eye(D)*2.3
+    priorsigma1 = np.eye(D)*2.3
     nu0 = 12.0
-    nu1 = 2.0
+    nu1 = 4.0
     kappa0 = 6.0
     kappa1 = 6.0
     
     #### Ground Truth Parameters 
-    #c = 0.83 # Ground truth class marginal
-    c = 0.5 # Ground truth class marginal
+    c = 0.8 # Ground truth class marginal
+    #c = 0.5 # Ground truth class marginal
     sigma0 = sample_invwishart(priorsigma0, nu0)
     sigma1 = sample_invwishart(priorsigma1, nu1)
     mu0 = np.zeros(D)
@@ -526,13 +525,12 @@ class GaussianSampler(Classifier):
         root.objfxn.sigma1.append((self.sigma1,))
         root.objfxn.c.append((self.c,))
 
-    def approx_error(self, db, c):
-        N = 50000
-        pts0 = self.dist0.gen_data(N)
-        pts1 = self.dist1.gen_data(N)
-        err0 = (self.calc_gavg(db, pts0) < 0) 
-        err1 = (self.calc_gavg(db, pts1) > 0) 
-        return (err0.sum()*c + err1.sum()*(1-c))/N
+    def approx_error(self, db, c, partial=False, N=50000):
+        pts0 = self.dist0.gen_data(int(N*c))
+        pts1 = self.dist1.gen_data(int(N*(1-c)))
+        err0 = (self.calc_gavg(db, pts0, partial) < 0) 
+        err1 = (self.calc_gavg(db, pts1, partial) > 0) 
+        return (err0.sum() + err1.sum())/N
 
     def calc_gavg(self, db, pts, partial=False):
         of = db.root.object.objfxn
@@ -602,8 +600,7 @@ if __name__ == '__main__':
     p.close('all')
 
     seed = np.random.randint(10**6)
-    #seed = 916833
-    #seed = 796708
+    seed = 40767
     #seed = 32
     print "Seed is %d" % seed
     np.random.seed(seed)
@@ -614,13 +611,13 @@ if __name__ == '__main__':
     ## Now test Gaussian Analytic calculation
     gc = GaussianCls(dist0, dist1)
 
-    #c = GaussianSampler(dist0,dist1)
-    #s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=1, thin=10)
-    #s.sample(1e4, temperature=1)
+    c = GaussianSampler(dist0,dist1)
+    s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=1, thin=10)
+    s.sample(1e4, temperature=1)
 
     print("Bayes error: %f" % gc.approx_error("bayes", cval))
     print("Cls true error: %f" % gc.approx_error("true", cval))
-    #print("Sampler true error: %f" % c.approx_error(s.db, cval))
+    print("Sampler true error: %f" % c.approx_error(s.db, cval))
     #s.compute_means(False)
 
     n, gextent, grid = get_grid(gc)
@@ -642,17 +639,17 @@ if __name__ == '__main__':
     p.colorbar()
     p.contour(p0-p1+gc.efactor, [0.0], extent=gextent, origin='lower', cmap = p.cm.gray)
 
-    d0 = dist0.gen_data(10000)
-    d1 = dist1.gen_data(10000)
-    p.subplot(2,2,3)
-    p.plot(d0[:,0], d0[:,1], 'g.', alpha=0.2)
-    p.axis((-8,8,-8,8))
-    p.subplot(2,2,4)
-    p.plot(d1[:,0], d1[:,1], 'r.', alpha=0.2)
-    p.axis((-8,8,-8,8))
+    #d0 = dist0.gen_data(10000)
+    #d1 = dist1.gen_data(10000)
+    #p.subplot(2,2,3)
+    #p.plot(d0[:,0], d0[:,1], 'g.', alpha=0.2)
+    #p.axis((-8,8,-8,8))
+    #p.subplot(2,2,4)
+    #p.plot(d1[:,0], d1[:,1], 'r.', alpha=0.2)
+    #p.axis((-8,8,-8,8))
 
-    p.show()
-    sys.exit()
+    #p.show()
+    #sys.exit()
 
     p.subplot(2,2,3)
     gavg = c.calc_gavg(s.db, grid).reshape(-1, n)
