@@ -30,13 +30,14 @@ s.sample(1e2, temperature=1)
 if 'WORKHASH' in os.environ:
     import zmq,time
     ctx = zmq.Context()
-    socket = ctx.socket(zmq.PUSH)
+    socket = ctx.socket(zmq.REQ)
     socket.connect('tcp://'+server+':7000')
 
     data = s.read_db()
     socket.send(os.environ['WORKHASH'], zmq.SNDMORE)
     socket.send(data)
-    time.sleep(2)
+    socket.recv()
     socket.close()
     ctx.term()
 
+s.db.close()
