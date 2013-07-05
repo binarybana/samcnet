@@ -290,38 +290,37 @@ class Classifier(object):
         assert(dist0.D == dist1.D)
         self.D = dist0.D
         self.n = dist0.n + dist1.n
-        pass
-
-    def predict(self, data):
-        """ Given data, return vector with predicted labels """
-        return map(self.predict_single, data)
-
-    def error(self, data, labels):
-        """ Given data and true labels return (numcorrect, numwrong) """
-        difs = (self.predict(data) - labels).nonzero()[0].sum()
-        return (labels.shape[0] - difs, difs)
 
 class GaussianDist(object):
-    def __init__(self, truemu, truesigma, n, priormu, nu, kappa, S, alpha=1):
+    def __init__(self, mu, sigma):
         """ Initialize Gaussian distribution with data and priors
         then calculate the analytic posterior """
-        self.truemu = truemu.copy()
-        self.truesigma = truesigma.copy()
+        self.mu = mu.copy()
+        self.sigma = sigma.copy()
 
-        self.n = n
-        self.data = self.gen_data(n)
+    def gen_data(self, n):
+        return np.random.multivariate_normal(self.mu, self.sigma, n)
 
-        self.priormu = priormu.copy()
+    def logp(self, pts):
+        return logp_normal(pts, self.mu, self.sigma)
+
+class GaussianBayes(object):
+    def __init__(self, priormu, nu, kappa, S, data, alpha=1, true_dist=None):
+        """ Initialize Gaussian distribution with data and priors
+        then calculate the analytic posterior """
+        self.true_dist = true_dist
+
+        self.data = data.copy()
+        self.n = data.shape[0]
+
+        self.priormu = np.asarray(priormu)
         self.nu = nu
         self.kappa = kappa
-        self.S = S.copy()
+        self.S = np.asarray(S)
         self.alpha = alpha
         self.D = self.data.shape[1]
 
         self.train_analytic()
-
-    def gen_data(self, n):
-        return np.random.multivariate_normal(self.truemu, self.truesigma, n)
 
     def train_analytic(self):
         """ Calculating the analytic distribution posteriors given on page 15 of Lori's 
@@ -346,15 +345,6 @@ class GaussianDist(object):
     def eval_posterior(self, pts):
         return self.fx.logpdf(pts)
 
-    def eval_posterior_grid(self, grid_n, grid):
-        return self.fx.logpdf(grid).reshape(grid_n, -1)
-
-    def eval_true_grid(self, grid_n, grid):
-        return self.eval_true(grid).reshape(grid_n, -1)
-
-    def eval_true(self, pts):
-        return logp_normal(pts, self.truemu, self.truesigma)
-
 class GaussianCls(Classifier):
     def __init__(self, dist0, dist1, c=None):
         """ Trains Classifier """
@@ -363,29 +353,29 @@ class GaussianCls(Classifier):
         # Expectation of C from page 3 eq. 1 using beta conjugate prior
         self.efactor = log(self.Ec) - log(1-self.Ec)
 
-    def predict_single(self, data):
-        if self.dist0.fx.logpdf(data) - self.dist1.fx.logpdf(data) + self.efactor > 0: 
-            return 0
-        else:
-            return 1
-        # TODO Might have these switched
-
     def calc_densities(self, grid, n, record):
         return (self.dist0.fx.logpdf(grid) - self.dist1.fx.logpdf(grid) + self.efactor).reshape(grid_n, -1)
 
-    def approx_error(self, errtype, c, N=50000):
-        pts0 = self.dist0.gen_data(int(N*c))
-        pts1 = self.dist1.gen_data(int(N*(1-c)))
-        if errtype == "bayes":
-            err0 = self.dist0.eval_true(pts0) - self.dist1.eval_true(pts0) + log(c) - log(1-c) < 0
-            err1 = self.dist0.eval_true(pts1) - self.dist1.eval_true(pts1) + log(c) - log(1-c) > 0
-        else:
-            err0 = self.dist0.eval_posterior(pts0) - self.dist1.eval_posterior(pts0) + self.efactor < 0
-            err1 = self.dist0.eval_posterior(pts1) - self.dist1.eval_posterior(pts1) + self.efactor > 0
+    def approx_bayes(self, c, N=50000):
+        pts0 = self.dist0.true_dist.gen_data(int(N*c))
+        pts1 = self.dist1.true_dist.gen_data(int(N*(1-c)))
+        err0 = self.dist0.true_dist.logp(pts0) - self.dist1.true_dist.logp(pts0) + log(c) - log(1-c) < 0
+        err1 = self.dist0.true_dist.logp(pts1) - self.dist1.true_dist.logp(pts1) + log(c) - log(1-c) > 0
         return (err0.sum() + err1.sum())/N
 
+    def approx_error_gen(self, N=50000):
+        pts0 = self.dist0.true_dist.gen_data(int(N*c))
+        pts1 = self.dist1.true_dist.gen_data(int(N*(1-c)))
+        err0 = self.dist0.eval_posterior(pts0) - self.dist1.eval_posterior(pts0) + self.efactor < 0
+        err1 = self.dist0.eval_posterior(pts1) - self.dist1.eval_posterior(pts1) + self.efactor > 0
+        return (err0.sum() + err1.sum())/N
+
+    def approx_error_data(self, data, labels):
+        preds = self.dist0.eval_posterior(data) - self.dist1.eval_posterior(data) + self.efactor < 0
+        return np.abs(preds-labels).sum()/float(labels.shape[0])
+
 def gen_dists():
-    D = 2
+    D = 4
     priorsigma0 = np.eye(D)*2.3
     priorsigma1 = np.eye(D)*2.3
     nu0 = 12.0
@@ -408,9 +398,13 @@ def gen_dists():
     n = 30
     n0 = st.binom.rvs(n, c)
     n1 = n - n0
-    dist0 = GaussianDist(mu0, sigma0, n0, mu0, nu0, kappa0, priorsigma0)
-    dist1 = GaussianDist(mu1, sigma1, n1, mu1, nu1, kappa1, priorsigma1)
-    return c, dist0, dist1
+
+    dist0 = GaussianDist(mu0, sigma0)
+    bayes0 = GaussianBayes(mu0, nu0, kappa0, priorsigma0, dist0.gen_data(n0), dist0)
+
+    dist1 = GaussianDist(mu1, sigma1)
+    bayes1 = GaussianBayes(mu1, nu1, kappa1, priorsigma1, dist1.gen_data(n1), dist1)
+    return c, bayes0, bayes1
 
 class GaussianSampler(Classifier):
     def __init__(self, dist0, dist1):
@@ -501,11 +495,12 @@ class GaussianSampler(Classifier):
         """ Takes a Pytables Group object (group) and the total number of samples expected and
         expands or creates the necessary groups.
         """
+        D = self.dist0.D
         objroot = db.root.object
-        db.createEArray(objroot.objfxn, 'mu0', t.Float64Atom(shape=(2,)), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'mu1', t.Float64Atom(shape=(2,)), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'sigma0', t.Float64Atom(shape=(2,2)), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'sigma1', t.Float64Atom(shape=(2,2)), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'mu0', t.Float64Atom(shape=(D,)), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'mu1', t.Float64Atom(shape=(D,)), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'sigma0', t.Float64Atom(shape=(D,D)), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'sigma1', t.Float64Atom(shape=(D,D)), (0,), expectedrows=size)
         db.createEArray(objroot.objfxn, 'c', t.Float64Atom(), (0,), expectedrows=size)
         #objroot._v_attrs.true_dict = self.true
         #temp = {}
@@ -525,12 +520,16 @@ class GaussianSampler(Classifier):
         root.objfxn.sigma1.append((self.sigma1,))
         root.objfxn.c.append((self.c,))
 
-    def approx_error(self, db, c, partial=False, N=50000):
+    def approx_error_gen(self, db, c, partial=False, N=50000):
         pts0 = self.dist0.gen_data(int(N*c))
         pts1 = self.dist1.gen_data(int(N*(1-c)))
         err0 = (self.calc_gavg(db, pts0, partial) < 0) 
         err1 = (self.calc_gavg(db, pts1, partial) > 0) 
         return (err0.sum() + err1.sum())/N
+
+    def approx_error_data(self, db, data, labels, partial=False):
+        preds = self.calc_gavg(db, data, partial) < 0
+        return np.abs(preds-labels).sum()/float(labels.shape[0])
 
     def calc_gavg(self, db, pts, partial=False):
         of = db.root.object.objfxn
@@ -555,8 +554,44 @@ class GaussianSampler(Classifier):
             res += parts[i] * np.exp(logp_normal(pts, mus[i], sigmas[i]))
         return np.log(res / parts.sum())
 
-def get_grid(cls):
+class MixturePoissonSampler(Classifier):
+    def __init__(self, dist0, dist1):
+        super(GaussianSampler, self).__init__(dist0, dist1)
+        ##### Proposal variances ######
+        self.propdof = 200
+        self.propmu = 0.2
+
+        ######## Starting point of MCMC Run #######
+        self.c = np.random.rand()
+        self.mu0 = dist0.data.mean(axis=0)
+        self.mu1 = dist1.data.mean(axis=0)
+        self.sigma0 = sample_invwishart(self.dist0.S, self.dist0.kappa)
+        self.sigma1 = sample_invwishart(self.dist1.S, self.dist1.kappa)
+
+        ###### Bookeeping ######
+        self.oldmu0 = None
+        self.oldmu1 = None
+        self.oldsigma0 = None
+        self.oldsigma1 = None
+        self.oldc = None
+        self.mtype = ''
+    def propose(self):
+        pass
+    def reject(self):
+        pass
+    def energy(self):
+        pass
+    def init_db(self,db,size):
+        pass
+    def save_iter_db(self, db):
+        pass
+    def approx_error(self, db, c, partial=False, N=50000):
+        pass
+
+def get_grid_cls(cls):
     samples = np.vstack((cls.dist0.gen_data(30), cls.dist1.gen_data(30)))
+
+def get_grid_data(samples):
     lx,hx,ly,hy = np.vstack((samples.min(axis=0), samples.max(axis=0))).T.flatten()
     xspread, yspread = hx-lx, hy-ly
     n = 30
@@ -569,18 +604,6 @@ def get_grid(cls):
                     np.linspace(lx,hx,n),
                     np.linspace(ly,hy,n))).reshape(-1,2)
     return n, gextent, grid
-
-def plot_mahalanobis(splot, mean, cov, color, pts):
-    v, w = np.linalg.eigh(cov)
-    u = w[0] / np.linalg.norm(w[0])
-    angle = np.arctan(u[1] / u[0])
-    angle = 180 * angle / np.pi  # convert to degrees
-    # filled gaussian at 2 standard deviation
-    ell = mpl.patches.Ellipse(mean, 2 * v[0] ** 0.5, 2 * v[1] ** 0.5,
-                                            180 + angle, color=color)
-    ell.set_clip_box(splot.bbox)
-    ell.set_alpha(0.3)
-    splot.add_artist(ell)
 
 def plot_ellipse(splot, mean, cov, color):
     v, w = np.linalg.eigh(cov)
@@ -606,66 +629,70 @@ if __name__ == '__main__':
     np.random.seed(seed)
 
     ## First generate true distributions and data
-    cval, dist0, dist1 = gen_dists()
+    #cval, dist0, dist1 = gen_dists()
+    
+    data = np.loadtxt('/home/bana/GSP/research/samc/synthetic/rnaseq/out/trn_norm.txt',
+            delimiter=',')[:,1:3]
+
+    data0 = data[:30,:]
+    data1 = data[30:,:]
+
+    #D = data.shape[1]
+    D = 2
+    bayes0 = GaussianBayes(np.zeros(D), 1, 8, np.eye(D)*3, data0)
+    bayes1 = GaussianBayes(np.zeros(D), 1, 8, np.eye(D)*3, data1)
+
+    test = np.loadtxt('/home/bana/GSP/research/samc/synthetic/rnaseq/out/tst_norm.txt',
+            delimiter=',')[:,1:3]
+
+    labels = np.hstack((np.zeros(500), np.ones(500)))
 
     ## Now test Gaussian Analytic calculation
-    gc = GaussianCls(dist0, dist1)
+    gc = GaussianCls(bayes0, bayes1)
 
-    c = GaussianSampler(dist0,dist1)
-    s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=1, thin=10)
-    s.sample(1e4, temperature=1)
+    #c = GaussianSampler(bayes0,bayes1)
+    #s = samc.SAMCRun(c, burn=0, stepscale=1000, refden=1, thin=10)
+    #s.sample(1e4, temperature=1)
 
-    print("Bayes error: %f" % gc.approx_error("bayes", cval))
-    print("Cls true error: %f" % gc.approx_error("true", cval))
-    print("Sampler true error: %f" % c.approx_error(s.db, cval))
+    #print("Bayes error: %f" % gc.approx_error("bayes", cval))
+    print("Cls true error: %f" % gc.approx_error_data(test, labels))
+    #print("Sampler true error: %f" % c.approx_error_data(s.db, test, labels))
     #s.compute_means(False)
 
-    n, gextent, grid = get_grid(gc)
+    n, gextent, grid = get_grid_data(test)
     sp = p.subplot(2,2,1)
     p.axis(gextent)
-    plot_ellipse(sp, dist0.truemu, dist0.truesigma, 'green')
-    plot_ellipse(sp, dist1.truemu, dist1.truesigma, 'red')
 
-    p.plot(dist0.data[:,0], dist0.data[:,1], 'go')
-    p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
+    p.plot(data0[:,0], data0[:,1], 'go')
+    p.plot(data1[:,0], data1[:,1], 'ro')
 
     p.subplot(2,2,2)
-    p.plot(dist0.data[:,0], dist0.data[:,1], 'go')
-    p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
+    p.plot(data0[:,0], data0[:,1], 'go')
+    p.plot(data1[:,0], data1[:,1], 'ro')
 
-    p0 = dist0.eval_posterior_grid(n, grid)
-    p1 = dist1.eval_posterior_grid(n, grid)
+    p0 = bayes0.eval_posterior(grid).reshape(-1,n)
+    p1 = bayes1.eval_posterior(grid).reshape(-1,n)
     p.imshow(p0-p1+gc.efactor, extent=gextent, origin='lower')
     p.colorbar()
     p.contour(p0-p1+gc.efactor, [0.0], extent=gextent, origin='lower', cmap = p.cm.gray)
 
-    #d0 = dist0.gen_data(10000)
-    #d1 = dist1.gen_data(10000)
-    #p.subplot(2,2,3)
-    #p.plot(d0[:,0], d0[:,1], 'g.', alpha=0.2)
-    #p.axis((-8,8,-8,8))
-    #p.subplot(2,2,4)
-    #p.plot(d1[:,0], d1[:,1], 'r.', alpha=0.2)
-    #p.axis((-8,8,-8,8))
-
-    #p.show()
-    #sys.exit()
-
     p.subplot(2,2,3)
-    gavg = c.calc_gavg(s.db, grid).reshape(-1, n)
-    p.plot(dist0.data[:,0], dist0.data[:,1], 'go')
-    p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
-    p.imshow(gavg, extent=gextent, origin='lower')
-    p.colorbar()
-    p.contour(gavg, [0.0], extent=gextent, origin='lower', cmap = p.cm.gray)
+    p.plot(test[500:,0], test[500:,1], 'r.', alpha=0.5)
+    p.plot(test[:500,0], test[:500,1], 'g.', alpha=0.5)
+    #gavg = c.calc_gavg(s.db, grid).reshape(-1, n)
+    #p.plot(dist0.data[:,0], dist0.data[:,1], 'go')
+    #p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
+    #p.imshow(gavg, extent=gextent, origin='lower')
+    #p.colorbar()
+    #p.contour(gavg, [0.0], extent=gextent, origin='lower', cmap = p.cm.gray)
 
-    p.subplot(2,2,4)
-    gavg = c.calc_gavg(s.db, grid, 5).reshape(-1, n)
-    p.plot(dist0.data[:,0], dist0.data[:,1], 'go')
-    p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
-    p.imshow(gavg, extent=gextent, origin='lower')
-    p.colorbar()
-    p.contour(gavg, [0.0], extent=gextent, origin='lower', cmap = p.cm.gray)
+    #p.subplot(2,2,4)
+    #gavg = c.calc_gavg(s.db, grid, 5).reshape(-1, n)
+    #p.plot(dist0.data[:,0], dist0.data[:,1], 'go')
+    #p.plot(dist1.data[:,0], dist1.data[:,1], 'ro')
+    #p.imshow(gavg, extent=gextent, origin='lower')
+    #p.colorbar()
+    #p.contour(gavg, [0.0], extent=gextent, origin='lower', cmap = p.cm.gray)
 
     p.show()
 
