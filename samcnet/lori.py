@@ -407,17 +407,19 @@ def gen_dists():
     return c, bayes0, bayes1
 
 class GaussianSampler(Classifier):
-    def __init__(self, dist0, dist1):
+    def __init__(self, dist0, dist1, data0, data1):
         super(GaussianSampler, self).__init__(dist0, dist1)
 
+        self.data0 = data0
+        self.data1 = data1
         ##### Proposal variances ######
         self.propdof = 200
         self.propmu = 0.2
 
         ######## Starting point of MCMC Run #######
         self.c = np.random.rand()
-        self.mu0 = dist0.data.mean(axis=0)
-        self.mu1 = dist1.data.mean(axis=0)
+        self.mu0 = self.data0.mean(axis=0)
+        self.mu1 = self.data1.mean(axis=0)
         self.sigma0 = sample_invwishart(self.dist0.S, self.dist0.kappa)
         self.sigma1 = sample_invwishart(self.dist1.S, self.dist1.kappa)
 
@@ -438,8 +440,8 @@ class GaussianSampler(Classifier):
         self.oldc = self.c
 
         if np.random.rand() < 0.01: # Random restart
-            self.mu0 = self.dist0.data.mean(axis=0)
-            self.mu1 = self.dist1.data.mean(axis=0)
+            self.mu0 = self.data0.mean(axis=0)
+            self.mu1 = self.data1.mean(axis=0)
             self.sigma0 = sample_invwishart(self.dist0.S, self.dist0.kappa)
             self.sigma1 = sample_invwishart(self.dist1.S, self.dist1.kappa)
         else:
@@ -469,12 +471,12 @@ class GaussianSampler(Classifier):
     def energy(self):
         sum = 0.0
         #class 0 negative log likelihood
-        points = self.dist0.data
+        points = self.data0
         if points.size > 0:
             sum -= logp_normal(points, self.mu0, self.sigma0).sum()
 
         #class 1 negative log likelihood
-        points = self.dist1.data
+        points = self.data1
         if points.size > 0:
             sum -= logp_normal(points, self.mu1, self.sigma1).sum()
                 
@@ -554,19 +556,32 @@ class GaussianSampler(Classifier):
             res += parts[i] * np.exp(logp_normal(pts, mus[i], sigmas[i]))
         return np.log(res / parts.sum())
 
-class MixturePoissonSampler(Classifier):
-    def __init__(self, dist0, dist1):
-        super(GaussianSampler, self).__init__(dist0, dist1)
+class MixturePoissonSampler():
+    def __init__(self, data0, data1):
+        self.data0 = data0
+        self.data1 = data1
+
         ##### Proposal variances ######
         self.propdof = 200
         self.propmu = 0.2
 
         ######## Starting point of MCMC Run #######
+        assert (data0.shape[1] == data1.shape[1], "Datasets must be of same featuresize")
+        self.D = data0.shape[1]
         self.c = np.random.rand()
-        self.mu0 = dist0.data.mean(axis=0)
-        self.mu1 = dist1.data.mean(axis=0)
-        self.sigma0 = sample_invwishart(self.dist0.S, self.dist0.kappa)
-        self.sigma1 = sample_invwishart(self.dist1.S, self.dist1.kappa)
+        self.kmax = 4
+        self.k0 = 1
+        self.k1 = 1
+        self.d0 = np.ones(data0.size)*10
+        self.d1 = np.ones(data0.size)*10
+
+        self.mu0 = np.ones((self.D,self.kmax))
+        self.mu1 = np.ones((self.D,self.kmax))
+        self.sigma0 = sample_invwishart(np.ones((self.D,self.D)), 5)
+        self.sigma1 = sample_invwishart(np.ones((self.D,self.D)), 5)
+
+        self.w0 = np.random.dirichlet((1)*self.k0)
+        self.w1 = np.random.dirichlet((1)*self.k1)
 
         ###### Bookeeping ######
         self.oldmu0 = None
@@ -574,13 +589,140 @@ class MixturePoissonSampler(Classifier):
         self.oldsigma0 = None
         self.oldsigma1 = None
         self.oldc = None
+        self.oldk0 = None
+        self.oldk1 = None
+        self.oldd0 = None
+        self.oldd1 = None
+        self.oldw0 = None
+        self.oldw1 = None
+
         self.mtype = ''
+
     def propose(self):
-        pass
+        """ 
+        We do one of a couple of things:
+        0) Modify number of mixture components (k)
+        1) Modify weights of mixture components (w)
+        2) Modify means of mixture components (mu)
+        3) Modify covariance matrices (sigma)
+        On every step let's modify d_i
+        """
+
+        self.oldmu0 = self.mu0.copy()
+        self.oldmu1 = self.mu1.copy()
+        self.oldsigma0 = self.sigma0.copy()
+        self.oldsigma1 = self.sigma1.copy()
+        self.oldc = self.c
+        self.oldk0 = self.k0
+        self.oldk1 = self.k1
+        self.oldd0 = self.d0.copy()
+        self.oldd1 = self.d1.copy()
+        self.oldw0 = self.w0.copy()
+        self.oldw1 = self.w1.copy()
+
+        scheme = np.random.randint(4)
+        if scheme == 0:
+            if self.k0 > 1 and self.k0 < self.kmax:
+                mod = np.random.choice((-1,1))
+            elif self.k0 == 1:
+                mod = 1
+            else:
+                mod = -1
+            if mod == 1: # Add one
+                self.mu0[:,self.k0] = self.mu0[:,self.k0-1]
+                self.w0 *= 0.8
+                self.w0 = np.hstack((self.w0, 0.2))
+                self.k0 += 1
+            else: # remove one
+                self.w0 = self.w0[:-1]
+                self.w0 /= self.w0.sum()
+                self.k0 -= 1
+
+            if self.k1 > 1 and self.k0 < self.kmax: # TODO YUCK! DRY
+                mod = np.random.choice((-1,1))
+            elif self.k1 == 1:
+                mod = 1
+            else:
+                mod = -1
+            if mod == 1: # Add one
+                self.mu1[:,self.k1] = self.mu1[:,self.k1-1]
+                self.w1 *= 0.8
+                self.w1 = np.hstack((self.w1, 0.2))
+                self.k1 += 1
+            else: # remove one
+                self.w1 = self.w1[:-1]
+                self.w1 /= self.w1.sum()
+                self.k1 -= 1
+
+        elif scheme == 1: # Modify weights
+            self.w0 = np.random.dirichlet((1)*self.k0)
+            self.w1 = np.random.dirichlet((1)*self.k1)
+
+        elif scheme == 2: # Modify means
+            self.mu0 += np.random.randn(self.D, self.kmax)
+            self.mu1 += np.random.randn(self.D, self.kmax)
+        elif scheme == 3: # Modify covariances
+            self.sigma0 = sample_invwishart(np.ones((self.D,self.D)), 5)
+            self.sigma1 = sample_invwishart(np.ones((self.D,self.D)), 5)
+        
+        #modify di's
+        self.d0 += np.random.randn(self.d0.size)
+        self.d1 += np.random.randn(self.d1.size)
+        np.clip(self.d0, 0.1, 1000, out=self.d0)
+        np.clip(self.d1, 0.1, 1000, out=self.d1)
+
+        return scheme
+
     def reject(self):
-        pass
+        self.mu0 = self.oldmu0
+        self.mu1 = self.oldmu1
+        self.sigma0 = self.oldsigma0
+        self.sigma1 = self.oldsigma1
+        self.c = self.oldc
+        self.k0 = self.oldk0
+        self.k1 = self.oldk1
+        self.d0 = self.oldd0
+        self.d1 = self.oldd1
+        self.w0 = self.oldw0
+        self.w1 = self.oldw1
+
     def energy(self):
-        pass
+        sum = 0.0
+        # generate lambda values
+        N = 100
+        lams0 = vstack(( MVNormal(self.mu[:,k], self.sigma0).rvs(N*self.w0[k]) for k in range(self.k0) ))
+        dat = np.empty((self.data0.shape[0], lams0.shape[0]), dtype=np.double)
+        for i in xrange(self.data0.shape[0]):
+            dat[:,i] = di.poisson.pmf(self.data0 # TODO
+
+
+        lams1 = vstack(( MVNormal(self.mu[:,k], self.sigma1).rvs(N*self.w1[k]) for k in range(self.k1) ))
+
+
+
+        #class 0 negative log likelihood
+        points = self.data0
+        if points.size > 0:
+            sum -= logp_normal(points, self.mu0, self.sigma0).sum()
+
+        #class 1 negative log likelihood
+        points = self.data1
+        if points.size > 0:
+            sum -= logp_normal(points, self.mu1, self.sigma1).sum()
+                
+        #Class proportion c (from page 3, eq 1)
+        sum -= log(self.c)*(self.dist0.alpha+self.dist0.n-1) \
+                + log(1-self.c)*(self.dist1.alpha+self.dist1.n-1) \
+                - betaln(self.dist0.alpha + self.dist0.n, self.dist1.alpha + self.dist1.n)
+
+        #Now add in the priors...
+        sum -= logp_invwishart(self.sigma0, self.dist0.kappa, self.dist0.S)
+        sum -= logp_invwishart(self.sigma1, self.dist1.kappa, self.dist1.S)
+        sum -= logp_normal(self.mu0, self.dist0.priormu, self.sigma0, self.dist0.nu)
+        sum -= logp_normal(self.mu1, self.dist1.priormu, self.sigma1, self.dist1.nu)
+
+        return sum
+
     def init_db(self,db,size):
         pass
     def save_iter_db(self, db):
