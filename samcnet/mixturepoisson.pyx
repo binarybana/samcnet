@@ -16,6 +16,7 @@ from math import pi
 import scipy.stats as st
 import scipy.stats.distributions as di
 import scipy
+import scipy.special as spec
 from scipy.special import betaln
 
 from statsmodels.sandbox.distributions.mv_normal import MVT,MVNormal
@@ -26,6 +27,7 @@ cdef extern from "math.h":
     double exp(double)
     double lgamma(double)
     double gamma(double)
+    double pow(double,double)
 
 def sample_invwishart(lmbda,dof):
     # TODO make a version that returns the cholesky
@@ -79,24 +81,28 @@ cdef class MixturePoissonSampler:
     cdef public:
         object data0, data1, mu0, mu1, sigma0, sigma1, w0, w1, S, priormu
         int D, kmax, k0, k1, d0, d1
-        double c, Ec, kappa, comp_geom, nu
+        double Ec, kappa, comp_geom, nu
 
         object oldmu0, oldmu1, oldsigma0, oldsigma1, oldw0, oldw1
         int oldk0, oldk1, oldd0, oldd1
-        double oldc
 
     def __init__(self, data0, data1):
         self.data0 = data0
         self.data1 = data1
 
-        ##### Proposal variances ######
-        #self.propdof = 200
-        #self.propmu = 0.2
-
-        ######## Starting point of MCMC Run #######
         assert data0.shape[1] == data1.shape[1], "Datasets must be of same featuresize"
         self.D = data0.shape[1]
-        self.c = np.random.rand()
+
+        ##### Proposal variances ######
+
+        ##### Prior Quantities ######
+        self.kappa = 10
+        self.S = np.eye(self.D) * self.kappa
+        self.comp_geom = 0.6
+        self.priormu = np.ones(self.D)
+        self.nu = 3.0
+
+        ######## Starting point of MCMC Run #######
         self.kmax = 4
         self.k0 = 1
         self.k1 = 1
@@ -105,33 +111,41 @@ cdef class MixturePoissonSampler:
 
         self.Ec = data0.shape[0] / (data1.shape[0] + data0.shape[0])
 
-        self.mu0 = np.ones((self.D,self.kmax))
-        self.mu1 = np.ones((self.D,self.kmax))
-        self.sigma0 = sample_invwishart(np.eye(self.D), 5)
-        self.sigma1 = sample_invwishart(np.eye(self.D), 5)
+        self.mu0 = np.ones((self.D,self.kmax)) * np.log(self.data0.mean(axis=0))[:,np.newaxis]/self.d0
+        self.mu1 = np.ones((self.D,self.kmax)) * np.log(self.data1.mean(axis=0))[:,np.newaxis]/self.d1
+        self.sigma0 = sample_invwishart(self.S, self.kappa)
+        self.sigma1 = sample_invwishart(self.S, self.kappa)
 
-        self.w0 = np.random.dirichlet((1,)*self.k0)
-        self.w1 = np.random.dirichlet((1,)*self.k1)
 
-        ##### Prior Quantities ######
-        self.kappa = 5
-        self.S = np.eye(self.D)
-        self.comp_geom = 0.6
-        self.priormu = np.zeros(self.D)
-        self.nu = 3.0
+        self.w0 = np.empty(self.kmax, np.double)
+        self.w1 = np.empty(self.kmax, np.double)
+
+        self.w0[:self.k0] = np.random.dirichlet((1,)*self.k0)
+        self.w1[:self.k1] = np.random.dirichlet((1,)*self.k1)
 
         ###### Bookeeping ######
-        self.oldmu0 = None
-        self.oldmu1 = None
-        self.oldsigma0 = None
-        self.oldsigma1 = None
-        self.oldc = 0.0
+        self.oldmu0 = self.mu0.copy()
+        self.oldmu1 = self.mu1.copy()
+        self.oldsigma0 = self.sigma0.copy()
+        self.oldsigma1 = self.sigma1.copy()
         self.oldk0 = 0
         self.oldk1 = 0
         self.oldd0 = 0
         self.oldd1 = 0
-        self.oldw0 = None
-        self.oldw1 = None
+        self.oldw0 = self.w0.copy()
+        self.oldw1 = self.w1.copy()
+
+    def copy(self):
+        return (self.mu0.copy(),
+            self.mu1.copy(),
+            self.sigma0.copy(),
+            self.sigma1.copy(),
+            self.k0,
+            self.k1,
+            self.d0,
+            self.d1,
+            self.w0.copy(),
+            self.w1.copy())
 
     def propose(self):
         """ 
@@ -143,17 +157,16 @@ cdef class MixturePoissonSampler:
         On every step let's modify d
         """
 
-        self.oldmu0 = self.mu0.copy()
-        self.oldmu1 = self.mu1.copy()
-        self.oldsigma0 = self.sigma0.copy()
-        self.oldsigma1 = self.sigma1.copy()
-        self.oldc = self.c
+        self.oldmu0[:] = self.mu0
+        self.oldmu1[:] = self.mu1
+        self.oldsigma0[:] = self.sigma0
+        self.oldsigma1[:] = self.sigma1
         self.oldk0 = self.k0
         self.oldk1 = self.k1
         self.oldd0 = self.d0
         self.oldd1 = self.d1
-        self.oldw0 = self.w0.copy()
-        self.oldw1 = self.w1.copy()
+        self.oldw0[:] = self.w0
+        self.oldw1[:] = self.w1
 
         scheme = np.random.randint(4)
         if scheme == 0:
@@ -166,14 +179,13 @@ cdef class MixturePoissonSampler:
             if mod == 1: # Add one
                 self.mu0[:,self.k0] = self.mu0[:,self.k0-1]
                 self.w0 *= 0.8
-                self.w0 = np.hstack((self.w0, 0.2))
+                self.w0[self.k0] = 0.2
                 self.k0 += 1
             else: # remove one
-                self.w0 = self.w0[:-1]
-                self.w0 /= self.w0.sum()
+                self.w0 /= self.w0[:self.k0-1].sum()
                 self.k0 -= 1
 
-            if self.k1 > 1 and self.k0 < self.kmax: # TODO YUCK! DRY
+            if self.k1 > 1 and self.k1 < self.kmax: # TODO YUCK! DRY
                 mod = np.random.choice((-1,1))
             elif self.k1 == 1:
                 mod = 1
@@ -182,16 +194,15 @@ cdef class MixturePoissonSampler:
             if mod == 1: # Add one
                 self.mu1[:,self.k1] = self.mu1[:,self.k1-1]
                 self.w1 *= 0.8
-                self.w1 = np.hstack((self.w1, 0.2))
+                self.w1[self.k1] = 0.2
                 self.k1 += 1
             else: # remove one
-                self.w1 = self.w1[:-1]
-                self.w1 /= self.w1.sum()
+                self.w1 /= self.w1[:self.k1-1].sum()
                 self.k1 -= 1
 
         elif scheme == 1: # Modify weights
-            self.w0 = np.random.dirichlet((1,)*self.k0)
-            self.w1 = np.random.dirichlet((1,)*self.k1)
+            self.w0[:self.k0] = np.random.dirichlet((1,)*self.k0)
+            self.w1[:self.k1] = np.random.dirichlet((1,)*self.k1)
 
         elif scheme == 2: # Modify means
             self.mu0 += np.random.randn(self.D, self.kmax)
@@ -209,24 +220,69 @@ cdef class MixturePoissonSampler:
         return scheme
 
     def reject(self):
-        self.mu0 = self.oldmu0
-        self.mu1 = self.oldmu1
-        self.sigma0 = self.oldsigma0
-        self.sigma1 = self.oldsigma1
-        self.c = self.oldc
+        self.mu0[:] = self.oldmu0
+        self.mu1[:] = self.oldmu1
+        self.sigma0[:] = self.oldsigma0
+        self.sigma1[:] = self.oldsigma1
         self.k0 = self.oldk0
         self.k1 = self.oldk1
         self.d0 = self.oldd0
         self.d1 = self.oldd1
-        self.w0 = self.oldw0
-        self.w1 = self.oldw1
+        self.w0[:] = self.oldw0
+        self.w1[:] = self.oldw1
+
+    def optim(self, x, grad):
+        """ 
+        For use with NLopt. Assuming k0 = k1 = 1 
+        """
+        cdef:
+            int d = self.D
+            int k = self.kmax
+            int ind = 0
+        self.mu0[:,0] = x[ind:ind+d]
+        ind += d
+        self.mu1[:,0] = x[ind:ind+d]
+        ind += d
+        self.sigma0.flat = x[ind:ind+d*d]
+        ind += d*d
+        self.sigma1.flat = x[ind:ind+d*d]
+        ind += d*d
+        self.d0 = x[ind]
+        ind += 1
+        self.d1 = x[ind]
+
+        self.w0[0] = 1.0
+        self.w1[0] = 1.0
+
+        self.k0 = 1
+        self.k1 = 1
+
+        try:
+            return self.energy()
+        except:
+            return np.inf
+
+    def get_dof(self):
+        """ Assuming k0 = k1 = 1 """
+        d = self.D
+        return 2*d + 2*d*d + 2 
+
+    def get_params(self):
+        """ Assuming k0 = k1 = 1 """
+        return np.hstack(( self.mu0[:,0].flat, 
+            self.mu1[:,1].flat,
+            self.sigma0.flat,
+            self.sigma1.flat,
+            self.d0,
+            self.d1 ))
 
     def energy(self):
-        cdef double accumlan, accumdat, accumK, accumD, sum = 0.0
-        cdef int i,j,m,d,numlam = 100
-
-        cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams0 = np.empty((numlam, self.D, self.k0), np.double)
-        cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams1 = np.empty((numlam, self.D, self.k1), np.double)
+        cdef double lam,pt,accumlan, accumdat, accumK, accumD, sum = 0.0
+        cdef int i,j,m,d,k,numcom,numdat,numlam = 20
+        cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams0 = \
+                        np.empty((numlam, self.D, self.k0), np.double)
+        cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams1 = \
+                        np.empty((numlam, self.D, self.k1), np.double)
         
         #class 0 negative log likelihood
         numcom = self.k0
@@ -242,19 +298,25 @@ cdef class MixturePoissonSampler:
                 for m in xrange(self.k0):
                     accumD = 1.0
                     for d in xrange(self.D):
-                        accumD *= di.poisson.pmf(self.data0[j,d], self.d0*exp(lams0[i,d,m]))
-                    accumK += accumD * self.w0[m]
+                        dat = self.data0[j,d]
+                        lam = self.d0*exp(lams0[i,d,m])
+                        accumD += dat*log(lam) - lgamma(dat+1) - lam
+                    accumK += exp(accumD) * self.w0[m]
                 accumdat *= accumK
             accumlan += accumdat
         if accumlan != 0.0:
-            sum += log(accumlan)
+            sum -= log(accumlan)
 
+        if sum != 0.0:
+            return sum
+        else:
+            return -np.inf
 
         #class 1 negative log likelihood
         numcom = self.k1
         numdat = self.data1.shape[0]
         # pre-generate all lambda values
-        for k in range(self.k0):
+        for k in range(self.k1):
             lams1[:,:,k] = MVNormal(self.mu1[:,k], self.sigma1).rvs(numlam)
         accumlan = 0.0
         for i in range(numlam):
@@ -264,12 +326,14 @@ cdef class MixturePoissonSampler:
                 for m in xrange(self.k1):
                     accumD = 1.0
                     for d in xrange(self.D):
-                        accumD *= di.poisson.pmf(self.data1[j,d], self.d1*exp(lams1[i,d,m]))
-                    accumK += accumD * self.w1[m]
+                        dat = self.data1[j,d]
+                        lam = self.d1*exp(lams1[i,d,m])
+                        accumD += dat*log(lam) - lgamma(dat+1) - lam
+                    accumK += exp(accumD) * self.w1[m]
                 accumdat *= accumK
             accumlan += accumdat
         if accumlan != 0.0:
-            sum += log(accumlan)
+            sum -= log(accumlan)
 
         #Class proportion c (from page 3, eq 1)
         # Should we do this? I don't think it's necessary for this model...
@@ -287,20 +351,24 @@ cdef class MixturePoissonSampler:
         for k in xrange(self.k1):
             sum -= logp_normal(self.mu1[:,k], self.priormu, self.S, self.nu)
 
+        if np.isnan(sum):
+            raise ValueError("sum is nan")
+
         return sum
 
     def init_db(self, db, size):
         """ Takes a Pytables Group object (group) and the total number of samples expected and
         expands or creates the necessary groups.
         """
-        D = self.dist0.D
+        D = self.D
         objroot = db.root.object
+        objroot._v_attrs['c'] = self.Ec
         db.createEArray(objroot.objfxn, 'mu0', t.Float64Atom(shape=(D,self.kmax)), (0,), expectedrows=size)
         db.createEArray(objroot.objfxn, 'mu1', t.Float64Atom(shape=(D,self.kmax)), (0,), expectedrows=size)
         db.createEArray(objroot.objfxn, 'sigma0', t.Float64Atom(shape=(D,D)), (0,), expectedrows=size)
         db.createEArray(objroot.objfxn, 'sigma1', t.Float64Atom(shape=(D,D)), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'k0', t.Float64Atom(), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'k1', t.Float64Atom(), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'k0', t.Int64Atom(), (0,), expectedrows=size)
+        db.createEArray(objroot.objfxn, 'k1', t.Int64Atom(), (0,), expectedrows=size)
         db.createEArray(objroot.objfxn, 'w0', t.Float64Atom(shape=(self.kmax,)), (0,), expectedrows=size)
         db.createEArray(objroot.objfxn, 'w1', t.Float64Atom(shape=(self.kmax,)), (0,), expectedrows=size)
         db.createEArray(objroot.objfxn, 'd0', t.Float64Atom(), (0,), expectedrows=size)
@@ -326,7 +394,9 @@ cdef class MixturePoissonSampler:
         preds = self.calc_gavg(db, data, partial) < 0
         return np.abs(preds-labels).sum()/float(labels.shape[0])
 
-    def calc_gavg(self, db, pts, partial=False):
+    def calc_gavg(self, db, pts, partial=False, cls=None):
+        if type(db) == str:
+            db = t.openFile(db,'r')
         of = db.root.object.objfxn
         temp = db.root.samc.theta_trace.read()
         parts = np.exp(temp - temp.max())
@@ -336,34 +406,44 @@ cdef class MixturePoissonSampler:
                     of.k0.read()[inds], of.w0.read()[inds], of.d0.read()[inds])
             g1 = self.calc_g(pts, parts[inds], of.mu1.read()[inds], of.sigma1.read()[inds],
                     of.k1.read()[inds], of.w1.read()[inds], of.d1.read()[inds])
-            Ec = of.c.read()[inds].mean()
         else:
             g0 = self.calc_g(pts, parts, of.mu0.read(), of.sigma0.read(),
                     of.k0.read(), of.w0.read(), of.d0.read())
             g1 = self.calc_g(pts, parts, of.mu1.read(), of.sigma1.read(),
                     of.k1.read(), of.w1.read(), of.d1.read())
-            Ec = self.Ec
+        Ec = db.root.object._v_attrs['c']
         efactor = log(Ec) - log(1-Ec)
-        return g0 - g1 + efactor
+        if cls == 0:
+            return g0
+        elif cls == 1:
+            return g1
+        else:
+            return g0 - g1 + efactor
 
     def calc_g(self, pts, parts, mus, sigmas, ks, ws, ds):
         """ Returns weighted (parts) average logp for all pts """
-        res = np.zeros(pts.shape[0])
-        accumlan = np.zeros(np.ones(pts.shape[0]))
-        accumD = np.ones(pts.shape[0])
+        cdef int i,j,m,d
+        numpts = pts.shape[0]
+        res = np.zeros(numpts)
+        accumlan = np.zeros(numpts)
+        accumD = np.ones(numpts)
         for i in range(parts.size):
             numlam = 100
             #class 0 negative log likelihood
-            numcom = self.ks[i]
+            numcom = int(ks[i])
             # generate lambda values
-            lams = np.dstack(( MVNormal(mus[i][:,k], self.sigmas[i]).rvs(numlam) for k in range(self.ks[i]) ))
+            lams = np.dstack(( MVNormal(mus[i][:,k], sigmas[i]).rvs(numlam) for k in range(numcom) ))
             accumlan[:] = 0
             for j in range(numlam):
-                for m in xrange(self.k0):
-                    accumD[:] = 1
+                for m in xrange(numcom):
+                    accumD[:] = 0
                     for d in xrange(self.D):
-                        accumD *= di.poisson.pmf(pts[:,d], self.ds[i]*exp(lams[j,d,m]))
-                    accumlan += accumD * self.w0[m]
+                        dat = pts[:,d]
+                        lam = ds[i]*exp(lams[j,d,m])
+                        accumD += dat*log(lam) 
+                        accumD -= spec.gammaln(dat+1) 
+                        accumD -= lam
+                    accumlan += np.exp(accumD) * ws[i][m]
 
             res += parts[i] * accumlan
         return np.log(res / parts.sum())
