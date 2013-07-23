@@ -49,8 +49,8 @@ def build(bld):
         LDFLAGS += ['-pg']
         #libs += ['PROF']
     if not bld.options.prof and not bld.options.debug: 
-        CFLAGS += ['-O2']
-        CXXFLAGS += ['-O2']
+        CFLAGS += ['-O2', '-g']
+        CXXFLAGS += ['-O2', '-g']
 
     #bld.env.CYTHONFLAGS = CYTHONFLAGS
 
@@ -78,6 +78,15 @@ def build(bld):
         cflags=CFLAGS,
         ldflags=LDFLAGS,
         target='bayesnet')
+
+    bld(features='c cshlib pyext',
+        source=['samcnet/mixturepoisson.pyx'],
+        #includes=['samcnet/netcost'],
+        #use='cost',
+        #libpath=['.','./build'],
+        cflags=CFLAGS,
+        ldflags=LDFLAGS,
+        target='mixturepoisson')
 
     bld(features='c cshlib cxx pyext',
         source=['samcnet/probability.pyx'],
