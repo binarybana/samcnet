@@ -17,8 +17,8 @@ cdef class SAMCRun:
         object obj, db, refden, hist, mapvalue, verbose
         int lowEnergy, highEnergy, grid, accept_loc, total_loc, iteration, burn, stepscale, thin
         double mapenergy, delta, scale, refden_power
-    def __init__(self, obj, burn=100000, stepscale = 10000, refden=0.0, thin=1, verbose=False):
-
+    def __init__(self, obj, burn=100000, stepscale = 10000, refden=0.0, thin=1, verbose=False,
+            lim_iters=2000):
         self.verbose = verbose
         self.obj = obj # Going to be a BayesNet for now, but we'll keep it general
         self.clear()
@@ -31,9 +31,9 @@ cdef class SAMCRun:
 
         self.db = None
 
-        self.set_energy_limits()
+        self.set_energy_limits(lim_iters)
 
-    def set_energy_limits(self):
+    def set_energy_limits(self, int lim_iters):
         cdef int i
         cdef double oldenergy, energy, low, high, spread
 
@@ -47,7 +47,7 @@ cdef class SAMCRun:
         while high > 1e90:
             self.obj.propose()
             low = high = oldenergy = energy = self.obj.energy()
-        for i in range(2000):
+        for i in range(lim_iters):
             self.obj.propose()
             energy = self.obj.energy() 
             r = (oldenergy-energy) / 3.0 # Higher temperature for exploration
