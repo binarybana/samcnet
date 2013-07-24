@@ -111,8 +111,8 @@ cdef class MixturePoissonSampler:
 
         self.Ec = data0.shape[0] / (data1.shape[0] + data0.shape[0])
 
-        self.mu0 = np.ones((self.D,self.kmax)) * np.log(self.data0.mean(axis=0))[:,np.newaxis]/self.d0
-        self.mu1 = np.ones((self.D,self.kmax)) * np.log(self.data1.mean(axis=0))[:,np.newaxis]/self.d1
+        self.mu0 = np.ones((self.D,self.kmax)) * np.log(self.data0.mean(axis=0)/self.d0)[:,np.newaxis]
+        self.mu1 = np.ones((self.D,self.kmax)) * np.log(self.data1.mean(axis=0)/self.d1)[:,np.newaxis]
         self.sigma0 = sample_invwishart(self.S, self.kappa)
         self.sigma1 = sample_invwishart(self.S, self.kappa)
 
@@ -258,7 +258,7 @@ cdef class MixturePoissonSampler:
         self.k1 = 1
 
         try:
-            return self.energy()
+            return self.energy(1000)
         except:
             return np.inf
 
@@ -276,9 +276,9 @@ cdef class MixturePoissonSampler:
             self.d0,
             self.d1 ))
 
-    def energy(self):
-        cdef double lam,pt,accumlan, accumdat, accumK, accumD, sum = 0.0
-        cdef int i,j,m,d,k,numcom,numdat,numlam = 20
+    def energy(self, int numlam = 100):
+        cdef double lam,pt,accumlan, accumdat, accumK, sum = 0.0
+        cdef int i,j,m,d,k,numcom,numdat
         cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams0 = \
                         np.empty((numlam, self.D, self.k0), np.double)
         cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams1 = \
@@ -289,28 +289,28 @@ cdef class MixturePoissonSampler:
         numdat = self.data0.shape[0]
         # pre-generate all lambda values
         for k in range(self.k0):
-            lams0[:,:,k] = MVNormal(self.mu0[:,k], self.sigma0).rvs(numlam)
+            lams0[:,:,k] =  MVNormal(self.mu0[:,k], self.sigma0).rvs(numlam)
+            #lams0[:,:,k] = self.mu0[:,k] 
         accumlan = 0.0
         for i in range(numlam):
             accumdat = 0.0
             for j in xrange(numdat):
-                accumK = 0.0
-                for m in xrange(self.k0):
-                    accumD = 1.0
-                    for d in xrange(self.D):
+                for d in xrange(self.D):
+                    accumK = 0.0
+                    for m in xrange(self.k0):
                         dat = self.data0[j,d]
                         lam = self.d0*exp(lams0[i,d,m])
-                        accumD += dat*log(lam) - lgamma(dat+1) - lam
-                    accumK += exp(accumD) * self.w0[m]
-                accumdat *= accumK
-            accumlan += accumdat
+                        accumK += exp(dat*log(lam) - lgamma(dat+1) - lam) * self.w0[m]
+                    accumdat += log(accumK) 
+            accumlan += exp(accumdat)
         if accumlan != 0.0:
-            sum -= log(accumlan)
-
-        if sum != 0.0:
-            return sum
+            sum -= log(accumlan/numlam)
         else:
-            return -np.inf
+            return np.inf
+
+        #print self.sigma0
+        #print self.mu0[:,0]
+        #print lams0.mean(axis=0).flatten()
 
         #class 1 negative log likelihood
         numcom = self.k1
@@ -322,18 +322,18 @@ cdef class MixturePoissonSampler:
         for i in range(numlam):
             accumdat = 0.0
             for j in xrange(numdat):
-                accumK = 0.0
-                for m in xrange(self.k1):
-                    accumD = 1.0
-                    for d in xrange(self.D):
+                for d in xrange(self.D):
+                    accumK = 0.0
+                    for m in xrange(self.k1):
                         dat = self.data1[j,d]
                         lam = self.d1*exp(lams1[i,d,m])
-                        accumD += dat*log(lam) - lgamma(dat+1) - lam
-                    accumK += exp(accumD) * self.w1[m]
-                accumdat *= accumK
-            accumlan += accumdat
+                        accumK += exp(dat*log(lam) - lgamma(dat+1) - lam) * self.w1[m]
+                    accumdat += log(accumK) 
+            accumlan += exp(accumdat)
         if accumlan != 0.0:
-            sum -= log(accumlan)
+            sum -= log(accumlan/numlam)
+        else:
+            return np.inf
 
         #Class proportion c (from page 3, eq 1)
         # Should we do this? I don't think it's necessary for this model...

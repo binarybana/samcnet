@@ -11,55 +11,67 @@ import scipy.stats.distributions as di
 import scipy
 import nlopt
 
-#seed = np.random.randint(10**6)
-seed = 40767
+seedr = np.random.randint(10**6)
+seedd = 40767
 #seed = 32
 #print "Seed is %d" % seed
-np.random.seed(seed)
+np.random.seed(seedd)
 
 p.close('all')
+N = 20
+data0 = np.hstack(( di.poisson.rvs(10*exp(1), size=(N,1)), di.poisson.rvs(10*exp(2), size=(N,1)) ))
+data1 = np.hstack(( di.poisson.rvs(10*exp(2), size=(N,1)), di.poisson.rvs(10*exp(1), size=(N,1)) ))
 
-data0 = np.hstack(( di.poisson.rvs(10*exp(1), size=(10,1)), di.poisson.rvs(10*exp(2), size=(10,1)) ))
-data1 = np.hstack(( di.poisson.rvs(10*exp(2), size=(10,1)), di.poisson.rvs(10*exp(1), size=(10,1)) ))
-
-seed = np.random.randint(10**6)
-np.random.seed(seed)
 
 mpm = MixturePoissonSampler(data0, data1)
+np.random.seed(seedr)
 #s = samc.SAMCRun(mpm, burn=0, stepscale=1000, refden=1, thin=10)
 #s.sample(1e4, temperature=1)
 #print s.mapvalue
-
 
 ########### NLOpt #############
 print mpm.energy()
 x = mpm.get_params()
 print x
 print mpm.optim(x,None)
-x[0:4] -= 2
-print x
-print mpm.optim(x,None)
 
+def pvec(x):
+	s = "[ "
+	for i in x:
+		s += "%5.1f," % i
+	s = s[:-1]
+	s+= " ]"
+	return s
 def f(x,grad):
-	return mpm.optim(x,grad)
+    e = mpm.optim(x,grad)
+    print "Trying: %8.2f %s" % (e,pvec(x))
+    return e
 
-opt = nlopt.opt(nlopt.LN_BOBYQA, mpm.get_dof())
-#opt = nlopt.opt(nlopt.GN_DIRECT_L, mpm.get_dof())
-opt.set_min_objective(mpm.optim)
-#opt.set_min_objective(f)
-opt.set_maxtime(3)
+#opt = nlopt.opt(nlopt.LN_BOBYQA, mpm.get_dof())
+opt = nlopt.opt(nlopt.GN_DIRECT_L, mpm.get_dof())
+#opt = nlopt.opt(nlopt.G_MLSL_LDS, mpm.get_dof())
+#lopt = nlopt.opt(nlopt.LN_NELDERMEAD, mpm.get_dof())
+#lopt.set_ftol_abs(5)
+#opt.set_local_optimizer(lopt)
+#opt.set_min_objective(mpm.optim)
+#opt.set_initial_step(0.5)
+opt.set_min_objective(f)
+opt.set_maxtime(10)
 #opt.set_maxeval(100)
 #opt.set_ftol_rel(1e-6)
-opt.set_lower_bounds(-10)
-opt.set_upper_bounds(10)
+#opt.set_lower_bounds(-10)
+#opt.set_upper_bounds(10)
+opt.set_lower_bounds(x-3.0)
+opt.set_upper_bounds(x+3.0)
+
 
 xopt = opt.optimize(x)
-opt_val = opt.last_optimum_value()
-result = opt.last_optimize_result()
+xopt_val = opt.last_optimum_value()
+ret = opt.last_optimize_result()
 
-print xopt
-print opt_val
-print result
+print "Starting: %9.3f %s" % (mpm.optim(x,None), pvec(x))
+print "Final   : %9.3f %s" % (xopt_val, pvec(xopt))
+print "Return: %d" %ret
 
 sys.exit()
 ########## /NLOpt #############
