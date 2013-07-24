@@ -133,6 +133,9 @@ cdef class MPMDist:
         self.curr.sigma = sample_invwishart(self.S, self.kappa)
         self.curr.w[:self.curr.k] = np.random.dirichlet((1,)*self.curr.k)
 
+        for i in xrange(self.curr.k):
+            self.curr.lam[:,i] = MVNormal(self.curr.mu[:,i], self.curr.sigma).rvs(1)
+
     def copy(self):
         return self.curr.copy()
 
@@ -145,7 +148,7 @@ cdef class MPMDist:
         3) Modify covariance matrices (sigma)
         On every step modify d and pick new lambda values
         """
-
+        cdef int i
         self.old.set(self.curr)
         self.curr.energy = -inf
         cdef MPMParams curr = self.curr
@@ -176,81 +179,73 @@ cdef class MPMDist:
             curr.sigma = sample_invwishart(np.eye(self.D), 5)
         
         #modify di's
-        curr.d += np.random.randn()*0.5
-        curr.d = np.clip(curr.d, 9,10)
-
-        #curr.lam
+        curr.d += np.random.randn()*0.2
+        curr.d = np.clip(curr.d, 8,12)
+        for i in xrange(self.curr.k):
+            curr.lam[:,i] = MVNormal(curr.mu[:,i], curr.sigma).rvs(1)
         return scheme
 
     def reject(self):
         self.curr.set(self.old)
 
-    def optim(self, x, grad):
-        """ 
-        For use with NLopt. Assuming k = 1 
-        """
-        cdef:
-            int d = self.D
-            int k = self.kmax
-            int ind = 0
-        self.curr.mu[:,0] = x[ind:ind+d]
-        ind += d
-        self.curr.sigma.flat = x[ind:ind+d*d]
-        ind += d*d
-        self.curr.d = x[ind]
-        self.curr.w[0] = 1.0
-        self.curr.k = 1
-        self.energy = -inf
+    ## FIXME These need to be updated for self.curr.lam
+    #def optim(self, x, grad):
+        #""" 
+        #For use with NLopt. Assuming k = 1 
+        #"""
+        #cdef:
+            #int d = self.D
+            #int k = self.kmax
+            #int ind = 0
+        #self.curr.mu[:,0] = x[ind:ind+d]
+        #ind += d
+        #self.curr.sigma.flat = x[ind:ind+d*d]
+        #ind += d*d
+        #self.curr.d = x[ind]
+        #self.curr.w[0] = 1.0
+        #self.curr.k = 1
+        #self.energy = -inf
 
-        try:
-            return self.energy(1000)
-        except:
-            return np.inf
+        #try:
+            #return self.energy(1000)
+        #except:
+            #return np.inf
 
-    def get_dof(self):
-        """ Assuming k = 1 """
-        d = self.D
-        return d + d*d + 1 
+    #def get_dof(self):
+        #""" Assuming k = 1 """
+        #d = self.D
+        #return d + d*d + 1 
 
-    def get_params(self):
-        """ Assuming k = 1 """
-        return np.hstack(( self.mu[:,0].flat, self.sigma.flat, self.d ))
+    #def get_params(self):
+        #""" Assuming k = 1 """
+        #return np.hstack(( self.mu[:,0].flat, self.sigma.flat, self.d ))
 
-    def energy(self, int numlam = 100, force = False):
+    def energy(self, force = False):
         if self.curr.energy != -inf and not force: # Cached 
             return self.curr.energy
 
-        cdef double lam,pt,accumlan, accumdat, accumK, sum = 0.0
-        cdef int i,j,m,d,k,numcom,numdat
+        cdef double lam,dat,accumdat,accumK,sum = 0.0
+        cdef int i,j,m,d
         curr = self.curr
-        cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams = \
-                        np.empty((numlam, self.D, curr.k), np.double)
         
-        numcom = curr.k
-        numdat = self.n
-        # pre-generate all lambda values
-        for k in range(curr.k):
-            lams[:,:,k] =  MVNormal(curr.mu[:,k], curr.sigma).rvs(numlam)
-            #lams[:,:,k] = curr.mu[:,k] 
-        accumlan = 0.0
-        for i in range(numlam):
-            accumdat = 0.0
-            for j in xrange(numdat):
-                for d in xrange(self.D):
-                    accumK = 0.0
+        accumdat = 0.0
+        for j in xrange(self.n):
+            for d in xrange(self.D):
+                dat = self.data[j,d]
+                accumK = 0.0
+                if curr.k == 1:
+                    lam = curr.d*exp(curr.lam[d,m])
+                    accumdat += dat*log(lam) - lgamma(dat+1) - lam
+                else: # Looks like I'll be losing a lot of precision here
                     for m in xrange(curr.k):
-                        dat = self.data[j,d]
-                        lam = curr.d*exp(lams[i,d,m])
+                        lam = curr.d*exp(curr.lam[d,m])
                         accumK += exp(dat*log(lam) - lgamma(dat+1) - lam) * curr.w[m]
                     accumdat += log(accumK) 
-            accumlan += exp(accumdat)
-        if accumlan != 0.0:
-            sum -= log(accumlan/numlam)
-        else:
-            self.curr.energy = inf
-            return inf
+        sum -= accumdat
 
         #Now add in the priors...
+        for i in xrange(curr.k):
+            sum -= logp_normal(curr.lam[:,i], curr.mu[:,i], curr.sigma, 1) #TODO check nu
         sum -= logp_invwishart(curr.sigma, self.kappa, self.S)
         sum -= di.geom.logpmf(curr.k, self.comp_geom)
         for k in xrange(curr.k):
@@ -265,6 +260,7 @@ cdef class MPMDist:
         """
         D = self.D
         db.createEArray(node, 'mu', t.Float64Atom(shape=(D,self.kmax)), (0,), expectedrows=size)
+        db.createEArray(node, 'lam', t.Float64Atom(shape=(D,self.kmax)), (0,), expectedrows=size)
         db.createEArray(node, 'sigma', t.Float64Atom(shape=(D,D)), (0,), expectedrows=size)
         db.createEArray(node, 'k', t.Int64Atom(), (0,), expectedrows=size)
         db.createEArray(node, 'w', t.Float64Atom(shape=(self.kmax,)), (0,), expectedrows=size)
@@ -275,6 +271,7 @@ cdef class MPMDist:
         Pytables db group object
         """ 
         db.mu.append((self.curr.mu,))
+        db.lam.append((self.curr.lam,))
         db.sigma.append((self.curr.sigma,))
         db.k.append((self.curr.k,))
         db.w.append((self.curr.w,))
@@ -287,38 +284,39 @@ cdef class MPMDist:
             inds = np.argsort(parts)[::-1][:partial]
         else:
             inds = np.arange(parts.size)
-        return self.calc_g(pts, parts[inds], node.mu.read()[inds], node.sigma.read()[inds],
+        return self.calc_g(pts, parts[inds], node.lam.read()[inds],
                 node.k.read()[inds], node.w.read()[inds], node.d.read()[inds])
 
     def calc_curr_g(self, object pts):
         parts = np.array([1])
-        return self.calc_g(pts, parts, [self.curr.mu], [self.curr.sigma],
+        return self.calc_g(pts, parts, [self.curr.lam],
                 [self.curr.k], [self.curr.w], [self.curr.d])
 
-    def calc_g(self, pts, parts, mus, sigmas, ks, ws, ds):
+    def calc_g(self, pts, parts, lams, ks, ws, ds):
         """ Returns weighted (parts) average logp for all pts """
-        cdef int i,j,m,d
+        cdef int i,m,d
         numpts = pts.shape[0]
         res = np.zeros(numpts)
-        accumlan = np.zeros(numpts)
-        accumD = np.ones(numpts)
+        accumD = np.zeros(numpts)
+        accumcom = np.zeros(numpts)
         for i in range(parts.size):
-            numlam = 1000
             numcom = int(ks[i])
-            # generate lambda values
-            lams = np.dstack(( MVNormal(mus[i][:,k], sigmas[i]).rvs(numlam) for k in range(numcom) ))
-            accumlan[:] = 0
-            for j in range(numlam):
-                for m in xrange(numcom):
-                    accumD[:] = 0
-                    for d in xrange(self.D):
+            accumD[:] = 0
+            for d in xrange(self.D):
+                if numcom == 1:
+                    dat = pts[:,d]
+                    lam = ds[i]*exp(lams[i][d,0])
+                    accumD += dat*log(lam) 
+                    accumD -= spec.gammaln(dat+1) 
+                    accumD -= lam
+                else:
+                    accumcom[:] = 0
+                    for m in xrange(numcom):
                         dat = pts[:,d]
-                        lam = ds[i]*exp(lams[j,d,m])
-                        accumD += dat*log(lam) 
-                        accumD -= spec.gammaln(dat+1) 
-                        accumD -= lam
-                    accumlan += np.exp(accumD) * ws[i][m]
-            res += parts[i] * accumlan
+                        lam = ds[i]*exp(lams[i][d,m])
+                        accumcom += np.exp(dat*log(lam) - spec.gammaln(dat+1) - lam) * ws[i][m]
+                    accumD += np.log(accumcom) 
+            res += parts[i] * np.exp(accumD)
         if parts.sum() == 0.0:
             print parts, "Is zero!"
         return np.log(res / parts.sum())
