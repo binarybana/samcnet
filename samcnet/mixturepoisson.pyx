@@ -420,6 +420,22 @@ cdef class MixturePoissonSampler:
         else:
             return g0 - g1 + efactor
 
+    def calc_curr_g(self, pts, cls=None):
+        parts = np.array([1])
+
+        g0 = self.calc_g(pts, parts, [self.mu0], [self.sigma0],
+                [self.k0], [self.w0], [self.d0])
+        g1 = self.calc_g(pts, parts, [self.mu1], [self.sigma1],
+                [self.k1], [self.w1], [self.d1])
+        Ec = self.Ec
+        efactor = log(Ec) - log(1-Ec)
+        if cls == 0:
+            return g0
+        elif cls == 1:
+            return g1
+        else:
+            return g0 - g1 + efactor
+
     def calc_g(self, pts, parts, mus, sigmas, ks, ws, ds):
         """ Returns weighted (parts) average logp for all pts """
         cdef int i,j,m,d
@@ -428,7 +444,7 @@ cdef class MixturePoissonSampler:
         accumlan = np.zeros(numpts)
         accumD = np.ones(numpts)
         for i in range(parts.size):
-            numlam = 100
+            numlam = 1000
             #class 0 negative log likelihood
             numcom = int(ks[i])
             # generate lambda values
