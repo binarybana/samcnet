@@ -12,6 +12,7 @@ import tables as t
 import matplotlib as mpl
 import random
 from math import pi
+from numpy import inf
 
 import scipy.stats as st
 import scipy.stats.distributions as di
@@ -77,23 +78,40 @@ def logp_normal(x, mu, sigma, nu=1.0):
             * (x-mu)).sum(axis=axis)
     return t1+t2+t3
 
-cdef class MixturePoissonSampler:
+cdef class MPMParams:
     cdef public:
-        object data0, data1, mu0, mu1, sigma0, sigma1, w0, w1, S, priormu
-        int D, kmax, k0, k1, d0, d1
-        double Ec, kappa, comp_geom, nu
+        object mu, sigma, w, lam
+        int k, d
+        double energy
+    def __init__(self,d,kmax):
+        self.mu = np.empty((d,kmax), np.double)
+        self.sigma = np.empty((d,d), np.double)
+        self.w = np.empty(kmax, np.double)
+        self.lam = np.empty((d,kmax), np.double)
+        self.energy = -inf
+    cdef void set(MPMParams self, MPMParams other):
+        self.mu[:] = other.mu
+        self.sigma[:] = other.sigma
+        self.w[:] = other.w
+        self.lam[:] = other.lam
+        self.k = other.k
+        self.d = other.d
+        self.energy = other.energy
+    def copy(self):
+        return (self.mu.copy(), self.sigma.copy(), self.k, self.d, 
+                self.w.copy(), self.lam.copy(), self.energy)
 
-        object oldmu0, oldmu1, oldsigma0, oldsigma1, oldw0, oldw1
-        int oldk0, oldk1, oldd0, oldd1
+cdef class MPMDist:
+    cdef public:
+        MPMParams curr, old
+        object data, S, priormu
+        int D, kmax, n
+        double kappa, comp_geom, nu
 
-    def __init__(self, data0, data1):
-        self.data0 = data0
-        self.data1 = data1
-
-        assert data0.shape[1] == data1.shape[1], "Datasets must be of same featuresize"
-        self.D = data0.shape[1]
-
-        ##### Proposal variances ######
+    def __init__(self, data):
+        self.data = data
+        self.n = data.shape[0]
+        self.D = data.shape[1]
 
         ##### Prior Quantities ######
         self.kappa = 10
@@ -102,50 +120,21 @@ cdef class MixturePoissonSampler:
         self.priormu = np.ones(self.D)
         self.nu = 3.0
 
-        ######## Starting point of MCMC Run #######
         self.kmax = 4
-        self.k0 = 1
-        self.k1 = 1
-        self.d0 = 10
-        self.d1 = 10
+        ######## Starting point of MCMC Run #######
+        self.curr = MPMParams(self.D, self.kmax)
+        self.old = MPMParams(self.D, self.kmax)
 
-        self.Ec = data0.shape[0] / (data1.shape[0] + data0.shape[0])
+        self.curr.k = 1
+        self.curr.d = 10
 
-        self.mu0 = np.ones((self.D,self.kmax)) * np.log(self.data0.mean(axis=0)/self.d0)[:,np.newaxis]
-        self.mu1 = np.ones((self.D,self.kmax)) * np.log(self.data1.mean(axis=0)/self.d1)[:,np.newaxis]
-        self.sigma0 = sample_invwishart(self.S, self.kappa)
-        self.sigma1 = sample_invwishart(self.S, self.kappa)
-
-
-        self.w0 = np.empty(self.kmax, np.double)
-        self.w1 = np.empty(self.kmax, np.double)
-
-        self.w0[:self.k0] = np.random.dirichlet((1,)*self.k0)
-        self.w1[:self.k1] = np.random.dirichlet((1,)*self.k1)
-
-        ###### Bookeeping ######
-        self.oldmu0 = self.mu0.copy()
-        self.oldmu1 = self.mu1.copy()
-        self.oldsigma0 = self.sigma0.copy()
-        self.oldsigma1 = self.sigma1.copy()
-        self.oldk0 = 0
-        self.oldk1 = 0
-        self.oldd0 = 0
-        self.oldd1 = 0
-        self.oldw0 = self.w0.copy()
-        self.oldw1 = self.w1.copy()
+        self.curr.mu = np.repeat(np.log(self.data.mean(axis=0)/self.curr.d).reshape(self.D,1),
+                self.kmax, axis=1)
+        self.curr.sigma = sample_invwishart(self.S, self.kappa)
+        self.curr.w[:self.curr.k] = np.random.dirichlet((1,)*self.curr.k)
 
     def copy(self):
-        return (self.mu0.copy(),
-            self.mu1.copy(),
-            self.sigma0.copy(),
-            self.sigma1.copy(),
-            self.k0,
-            self.k1,
-            self.d0,
-            self.d1,
-            self.w0.copy(),
-            self.w1.copy())
+        return self.curr.copy()
 
     def propose(self):
         """ 
@@ -154,108 +143,64 @@ cdef class MixturePoissonSampler:
         1) Modify weights of mixture components (w)
         2) Modify means of mixture components (mu)
         3) Modify covariance matrices (sigma)
-        On every step let's modify d
+        On every step modify d and pick new lambda values
         """
 
-        self.oldmu0[:] = self.mu0
-        self.oldmu1[:] = self.mu1
-        self.oldsigma0[:] = self.sigma0
-        self.oldsigma1[:] = self.sigma1
-        self.oldk0 = self.k0
-        self.oldk1 = self.k1
-        self.oldd0 = self.d0
-        self.oldd1 = self.d1
-        self.oldw0[:] = self.w0
-        self.oldw1[:] = self.w1
+        self.old.set(self.curr)
+        self.curr.energy = -inf
+        cdef MPMParams curr = self.curr
 
         scheme = np.random.randint(4)
         if scheme == 0:
-            if self.k0 > 1 and self.k0 < self.kmax:
+            if curr.k > 1 and curr.k < self.kmax:
                 mod = np.random.choice((-1,1))
-            elif self.k0 == 1:
+            elif curr.k == 1:
                 mod = 1
             else:
                 mod = -1
             if mod == 1: # Add one
-                self.mu0[:,self.k0] = self.mu0[:,self.k0-1]
-                self.w0 *= 0.8
-                self.w0[self.k0] = 0.2
-                self.k0 += 1
+                curr.mu[:,curr.k] = curr.mu[:,curr.k-1]
+                curr.w *= 0.8
+                curr.w[curr.k] = 0.2
+                curr.k += 1
             else: # remove one
-                self.w0 /= self.w0[:self.k0-1].sum()
-                self.k0 -= 1
-
-            if self.k1 > 1 and self.k1 < self.kmax: # TODO YUCK! DRY
-                mod = np.random.choice((-1,1))
-            elif self.k1 == 1:
-                mod = 1
-            else:
-                mod = -1
-            if mod == 1: # Add one
-                self.mu1[:,self.k1] = self.mu1[:,self.k1-1]
-                self.w1 *= 0.8
-                self.w1[self.k1] = 0.2
-                self.k1 += 1
-            else: # remove one
-                self.w1 /= self.w1[:self.k1-1].sum()
-                self.k1 -= 1
+                curr.w /= curr.w[:curr.k-1].sum()
+                curr.k -= 1
 
         elif scheme == 1: # Modify weights
-            self.w0[:self.k0] = np.random.dirichlet((1,)*self.k0)
-            self.w1[:self.k1] = np.random.dirichlet((1,)*self.k1)
+            curr.w[:curr.k] = np.random.dirichlet((1,)*curr.k)
 
         elif scheme == 2: # Modify means
-            self.mu0 += np.random.randn(self.D, self.kmax)
-            self.mu1 += np.random.randn(self.D, self.kmax)
+            curr.mu += np.random.randn(self.D, self.kmax)
         elif scheme == 3: # Modify covariances
-            self.sigma0 = sample_invwishart(np.eye(self.D), 5)
-            self.sigma1 = sample_invwishart(np.eye(self.D), 5)
+            curr.sigma = sample_invwishart(np.eye(self.D), 5)
         
         #modify di's
-        self.d0 += np.random.randn()*0.5
-        self.d1 += np.random.randn()*0.5
-        self.d0 = np.clip(self.d0, 9,10)
-        self.d1 = np.clip(self.d1, 9,10)
+        curr.d += np.random.randn()*0.5
+        curr.d = np.clip(curr.d, 9,10)
 
+        #curr.lam
         return scheme
 
     def reject(self):
-        self.mu0[:] = self.oldmu0
-        self.mu1[:] = self.oldmu1
-        self.sigma0[:] = self.oldsigma0
-        self.sigma1[:] = self.oldsigma1
-        self.k0 = self.oldk0
-        self.k1 = self.oldk1
-        self.d0 = self.oldd0
-        self.d1 = self.oldd1
-        self.w0[:] = self.oldw0
-        self.w1[:] = self.oldw1
+        self.curr.set(self.old)
 
     def optim(self, x, grad):
         """ 
-        For use with NLopt. Assuming k0 = k1 = 1 
+        For use with NLopt. Assuming k = 1 
         """
         cdef:
             int d = self.D
             int k = self.kmax
             int ind = 0
-        self.mu0[:,0] = x[ind:ind+d]
+        self.curr.mu[:,0] = x[ind:ind+d]
         ind += d
-        self.mu1[:,0] = x[ind:ind+d]
-        ind += d
-        self.sigma0.flat = x[ind:ind+d*d]
+        self.curr.sigma.flat = x[ind:ind+d*d]
         ind += d*d
-        self.sigma1.flat = x[ind:ind+d*d]
-        ind += d*d
-        self.d0 = x[ind]
-        ind += 1
-        self.d1 = x[ind]
-
-        self.w0[0] = 1.0
-        self.w1[0] = 1.0
-
-        self.k0 = 1
-        self.k1 = 1
+        self.curr.d = x[ind]
+        self.curr.w[0] = 1.0
+        self.curr.k = 1
+        self.energy = -inf
 
         try:
             return self.energy(1000)
@@ -263,178 +208,92 @@ cdef class MixturePoissonSampler:
             return np.inf
 
     def get_dof(self):
-        """ Assuming k0 = k1 = 1 """
+        """ Assuming k = 1 """
         d = self.D
-        return 2*d + 2*d*d + 2 
+        return d + d*d + 1 
 
     def get_params(self):
-        """ Assuming k0 = k1 = 1 """
-        return np.hstack(( self.mu0[:,0].flat, 
-            self.mu1[:,1].flat,
-            self.sigma0.flat,
-            self.sigma1.flat,
-            self.d0,
-            self.d1 ))
+        """ Assuming k = 1 """
+        return np.hstack(( self.mu[:,0].flat, self.sigma.flat, self.d ))
 
-    def energy(self, int numlam = 100):
+    def energy(self, int numlam = 100, force = False):
+        if self.curr.energy != -inf and not force: # Cached 
+            return self.curr.energy
+
         cdef double lam,pt,accumlan, accumdat, accumK, sum = 0.0
         cdef int i,j,m,d,k,numcom,numdat
-        cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams0 = \
-                        np.empty((numlam, self.D, self.k0), np.double)
-        cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams1 = \
-                        np.empty((numlam, self.D, self.k1), np.double)
+        curr = self.curr
+        cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams = \
+                        np.empty((numlam, self.D, curr.k), np.double)
         
-        #class 0 negative log likelihood
-        numcom = self.k0
-        numdat = self.data0.shape[0]
+        numcom = curr.k
+        numdat = self.n
         # pre-generate all lambda values
-        for k in range(self.k0):
-            lams0[:,:,k] =  MVNormal(self.mu0[:,k], self.sigma0).rvs(numlam)
-            #lams0[:,:,k] = self.mu0[:,k] 
+        for k in range(curr.k):
+            lams[:,:,k] =  MVNormal(curr.mu[:,k], curr.sigma).rvs(numlam)
+            #lams[:,:,k] = curr.mu[:,k] 
         accumlan = 0.0
         for i in range(numlam):
             accumdat = 0.0
             for j in xrange(numdat):
                 for d in xrange(self.D):
                     accumK = 0.0
-                    for m in xrange(self.k0):
-                        dat = self.data0[j,d]
-                        lam = self.d0*exp(lams0[i,d,m])
-                        accumK += exp(dat*log(lam) - lgamma(dat+1) - lam) * self.w0[m]
+                    for m in xrange(curr.k):
+                        dat = self.data[j,d]
+                        lam = curr.d*exp(lams[i,d,m])
+                        accumK += exp(dat*log(lam) - lgamma(dat+1) - lam) * curr.w[m]
                     accumdat += log(accumK) 
             accumlan += exp(accumdat)
         if accumlan != 0.0:
             sum -= log(accumlan/numlam)
         else:
-            return np.inf
-
-        #print self.sigma0
-        #print self.mu0[:,0]
-        #print lams0.mean(axis=0).flatten()
-
-        #class 1 negative log likelihood
-        numcom = self.k1
-        numdat = self.data1.shape[0]
-        # pre-generate all lambda values
-        for k in range(self.k1):
-            lams1[:,:,k] = MVNormal(self.mu1[:,k], self.sigma1).rvs(numlam)
-        accumlan = 0.0
-        for i in range(numlam):
-            accumdat = 0.0
-            for j in xrange(numdat):
-                for d in xrange(self.D):
-                    accumK = 0.0
-                    for m in xrange(self.k1):
-                        dat = self.data1[j,d]
-                        lam = self.d1*exp(lams1[i,d,m])
-                        accumK += exp(dat*log(lam) - lgamma(dat+1) - lam) * self.w1[m]
-                    accumdat += log(accumK) 
-            accumlan += exp(accumdat)
-        if accumlan != 0.0:
-            sum -= log(accumlan/numlam)
-        else:
-            return np.inf
-
-        #Class proportion c (from page 3, eq 1)
-        # Should we do this? I don't think it's necessary for this model...
-        #sum -= log(self.c)*(self.dist0.alpha+self.dist0.n-1) \
-                #+ log(1-self.c)*(self.dist1.alpha+self.dist1.n-1) \
-                #- betaln(self.dist0.alpha + self.dist0.n, self.dist1.alpha + self.dist1.n)
+            self.curr.energy = inf
+            return inf
 
         #Now add in the priors...
-        sum -= logp_invwishart(self.sigma0, self.kappa, self.S)
-        sum -= logp_invwishart(self.sigma1, self.kappa, self.S)
-        sum -= di.geom.logpmf(self.k0, self.comp_geom)
-        sum -= di.geom.logpmf(self.k1, self.comp_geom)
-        for k in xrange(self.k0):
-            sum -= logp_normal(self.mu0[:,k], self.priormu, self.S, self.nu)
-        for k in xrange(self.k1):
-            sum -= logp_normal(self.mu1[:,k], self.priormu, self.S, self.nu)
+        sum -= logp_invwishart(curr.sigma, self.kappa, self.S)
+        sum -= di.geom.logpmf(curr.k, self.comp_geom)
+        for k in xrange(curr.k):
+            sum -= logp_normal(curr.mu[:,k], self.priormu, self.S, self.nu)
 
-        if np.isnan(sum):
-            raise ValueError("sum is nan")
-
+        self.curr.energy = sum
         return sum
 
-    def init_db(self, db, size):
-        """ Takes a Pytables Group object (group) and the total number of samples expected and
+    def init_db(self, db, node, size):
+        """ Takes a Pytables db and Group object (node) and the total number of samples expected and
         expands or creates the necessary groups.
         """
         D = self.D
-        objroot = db.root.object
-        objroot._v_attrs['c'] = self.Ec
-        db.createEArray(objroot.objfxn, 'mu0', t.Float64Atom(shape=(D,self.kmax)), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'mu1', t.Float64Atom(shape=(D,self.kmax)), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'sigma0', t.Float64Atom(shape=(D,D)), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'sigma1', t.Float64Atom(shape=(D,D)), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'k0', t.Int64Atom(), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'k1', t.Int64Atom(), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'w0', t.Float64Atom(shape=(self.kmax,)), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'w1', t.Float64Atom(shape=(self.kmax,)), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'd0', t.Float64Atom(), (0,), expectedrows=size)
-        db.createEArray(objroot.objfxn, 'd1', t.Float64Atom(), (0,), expectedrows=size)
+        db.createEArray(node, 'mu', t.Float64Atom(shape=(D,self.kmax)), (0,), expectedrows=size)
+        db.createEArray(node, 'sigma', t.Float64Atom(shape=(D,D)), (0,), expectedrows=size)
+        db.createEArray(node, 'k', t.Int64Atom(), (0,), expectedrows=size)
+        db.createEArray(node, 'w', t.Float64Atom(shape=(self.kmax,)), (0,), expectedrows=size)
+        db.createEArray(node, 'd', t.Float64Atom(), (0,), expectedrows=size)
 
     def save_iter_db(self, db):
         """ Saves objective function (and possible samples depending on verbosity) to
-        Pytables db
+        Pytables db group object
         """ 
-        root = db.root.object
-        root.objfxn.mu0.append((self.mu0,))
-        root.objfxn.mu1.append((self.mu1,))
-        root.objfxn.sigma0.append((self.sigma0,))
-        root.objfxn.sigma1.append((self.sigma1,))
-        root.objfxn.k0.append((self.k0,))
-        root.objfxn.k1.append((self.k1,))
-        root.objfxn.w0.append((self.w0,))
-        root.objfxn.w1.append((self.w1,))
-        root.objfxn.d0.append((self.d0,))
-        root.objfxn.d1.append((self.d1,))
+        db.mu.append((self.curr.mu,))
+        db.sigma.append((self.curr.sigma,))
+        db.k.append((self.curr.k,))
+        db.w.append((self.curr.w,))
+        db.d.append((self.curr.d,))
 
-    def approx_error_data(self, db, data, labels, partial=False):
-        preds = self.calc_gavg(db, data, partial) < 0
-        return np.abs(preds-labels).sum()/float(labels.shape[0])
-
-    def calc_gavg(self, db, pts, partial=False, cls=None):
-        if type(db) == str:
-            db = t.openFile(db,'r')
-        of = db.root.object.objfxn
+    def calc_db_g(self, db, node, pts, partial=None):
         temp = db.root.samc.theta_trace.read()
         parts = np.exp(temp - temp.max())
         if partial:
             inds = np.argsort(parts)[::-1][:partial]
-            g0 = self.calc_g(pts, parts[inds], of.mu0.read()[inds], of.sigma0.read()[inds],
-                    of.k0.read()[inds], of.w0.read()[inds], of.d0.read()[inds])
-            g1 = self.calc_g(pts, parts[inds], of.mu1.read()[inds], of.sigma1.read()[inds],
-                    of.k1.read()[inds], of.w1.read()[inds], of.d1.read()[inds])
         else:
-            g0 = self.calc_g(pts, parts, of.mu0.read(), of.sigma0.read(),
-                    of.k0.read(), of.w0.read(), of.d0.read())
-            g1 = self.calc_g(pts, parts, of.mu1.read(), of.sigma1.read(),
-                    of.k1.read(), of.w1.read(), of.d1.read())
-        Ec = db.root.object._v_attrs['c']
-        efactor = log(Ec) - log(1-Ec)
-        if cls == 0:
-            return g0
-        elif cls == 1:
-            return g1
-        else:
-            return g0 - g1 + efactor
+            inds = np.arange(parts.size)
+        return self.calc_g(pts, parts[inds], node.mu.read()[inds], node.sigma.read()[inds],
+                node.k.read()[inds], node.w.read()[inds], node.d.read()[inds])
 
-    def calc_curr_g(self, pts, cls=None):
+    def calc_curr_g(self, object pts):
         parts = np.array([1])
-
-        g0 = self.calc_g(pts, parts, [self.mu0], [self.sigma0],
-                [self.k0], [self.w0], [self.d0])
-        g1 = self.calc_g(pts, parts, [self.mu1], [self.sigma1],
-                [self.k1], [self.w1], [self.d1])
-        Ec = self.Ec
-        efactor = log(Ec) - log(1-Ec)
-        if cls == 0:
-            return g0
-        elif cls == 1:
-            return g1
-        else:
-            return g0 - g1 + efactor
+        return self.calc_g(pts, parts, [self.curr.mu], [self.curr.sigma],
+                [self.curr.k], [self.curr.w], [self.curr.d])
 
     def calc_g(self, pts, parts, mus, sigmas, ks, ws, ds):
         """ Returns weighted (parts) average logp for all pts """
@@ -445,7 +304,6 @@ cdef class MixturePoissonSampler:
         accumD = np.ones(numpts)
         for i in range(parts.size):
             numlam = 1000
-            #class 0 negative log likelihood
             numcom = int(ks[i])
             # generate lambda values
             lams = np.dstack(( MVNormal(mus[i][:,k], sigmas[i]).rvs(numlam) for k in range(numcom) ))
@@ -460,7 +318,103 @@ cdef class MixturePoissonSampler:
                         accumD -= spec.gammaln(dat+1) 
                         accumD -= lam
                     accumlan += np.exp(accumD) * ws[i][m]
-
             res += parts[i] * accumlan
+        if parts.sum() == 0.0:
+            print parts, "Is zero!"
         return np.log(res / parts.sum())
+
+    #cdef inline double logp_point(self, double pt, double lam, double d):
+        #return pt*(log(d)+lam) - lgamma(pt+1) - lam
+
+cdef class MPMCls:
+    cdef public:
+        MPMDist dist0, dist1
+        double Ec
+        int numlam, lastmod  # Lastmod is a dirty flag that also tells us where we're dirty
+
+    def __init__(self, dist0, dist1, numlam=100):
+        self.dist0 = dist0
+        self.dist1 = dist1
+        assert self.dist0.D == self.dist1.D, "Datasets must be of same featuresize"
+        self.Ec = self.dist0.n / (self.dist0.n + self.dist1.n)
+        self.numlam = numlam
+
+    def propose(self):
+        """ 
+        At each step we either modify dist0 or dist1
+        """
+        self.lastmod = np.random.randint(2)
+        if self.lastmod == 0:
+            scheme = self.dist0.propose()
+        elif self.lastmod == 1: 
+            scheme = self.dist1.propose()
+        return scheme
+
+    def reject(self):
+        if self.lastmod == 0:
+            self.dist0.reject()
+        elif self.lastmod == 1:
+            self.dist1.reject()
+        else:
+            raise Exception("Rejection not possible")
+
+    def optim(self, x, grad):
+        """ 
+        For use with NLopt. Assuming k = 1 
+        """
+        half = x.size/2
+        try:
+            return self.dist0.optim(x[:half],grad) + self.dist1.optim(x[half:],grad)
+        except:
+            return np.inf
+
+    def get_dof(self):
+        return self.dist0.get_dof() + self.dist0.get_dof()
+
+    def get_params(self):
+        """ Assuming k = 1 """
+        return np.hstack(( self.dist0.get_params().flat, self.dist1.get_params().flat ))
+
+    def copy(self):
+        return (self.dist0.copy(), self.dist1.copy())
+
+    def energy(self):
+        return self.dist0.energy(self.numlam) + self.dist1.energy(self.numlam)
+
+    def init_db(self, db, size):
+        """ Takes a Pytables db and the total number of samples expected and
+        expands or creates the necessary groups.
+        """
+        filt = t.Filters(complib='bzip2', complevel=7, fletcher32=True)
+        db.createGroup('/object', 'dist0', 'Dist0 trace', filters=filt)
+        db.createGroup('/object', 'dist1', 'Dist1 trace', filters=filt)
+        db.root.object._v_attrs['c'] = self.Ec
+        self.dist0.init_db(db, db.root.object.dist0, size)
+        self.dist1.init_db(db, db.root.object.dist1, size)
+
+    def save_iter_db(self, db):
+        """ Saves objective function (and possible samples depending on verbosity) to
+        Pytables db
+        """ 
+        self.dist0.save_iter_db(db.root.object.dist0)
+        self.dist1.save_iter_db(db.root.object.dist1)
+
+    def approx_error_data(self, db, data, labels, partial=False):
+        preds = self.calc_gavg(db, data, partial) < 0
+        return np.abs(preds-labels).sum()/float(labels.shape[0])
+
+    def calc_gavg(self, db, pts, partial=False, cls=None):
+        if type(db) == str:
+            db = t.openFile(db,'r')
+        g0 = self.dist0.calc_db_g(db, db.root.object.dist0, pts, partial)
+        g1 = self.dist1.calc_db_g(db, db.root.object.dist1, pts, partial)
+        Ec = db.root.object._v_attrs['c']
+        efactor = log(Ec) - log(1-Ec)
+        return g0 - g1 + efactor
+
+    def calc_curr_g(self, pts):
+        g0 = self.dist0.calc_curr_g(pts)
+        g1 = self.dist1.calc_curr_g(pts)
+        efactor = log(self.Ec) - log(1-self.Ec)
+        return g0 - g1 + efactor
 

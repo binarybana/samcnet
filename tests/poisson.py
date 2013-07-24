@@ -22,7 +22,9 @@ N = 20
 data0 = np.hstack(( di.poisson.rvs(10*exp(1), size=(N,1)), di.poisson.rvs(10*exp(2), size=(N,1)) ))
 data1 = np.hstack(( di.poisson.rvs(10*exp(2), size=(N,1)), di.poisson.rvs(10*exp(1), size=(N,1)) ))
 
-mpm = MixturePoissonSampler(data0, data1)
+dist0 = MPMDist(data0)
+dist1 = MPMDist(data1)
+mpm = MPMCls(dist0, dist1)
 np.random.seed(seedr)
 
 ########## SAMC #############
@@ -44,9 +46,9 @@ g = mpm.calc_curr_g(grid).reshape(-1,n)
 #s = samc.SAMCRun(mpm, burn=0, stepscale=1000, refden=1, thin=10, lim_iters=200)
 #s.sample(1e3, temperature=1)
 #gavg = mpm.calc_gavg(s.db, grid, 50).reshape(-1,n)
-gavg = mpm.calc_gavg(".tmp/samcPoCdx6", grid, 100).reshape(-1,n)
+#gavg = mpm.calc_gavg(".tmp/samcPoCdx6", grid, 100).reshape(-1,n)
 
-myplot(sb1,gavg)
+#myplot(sb1,gavg)
 myplot(sb2,g)
 
 p.show()
