@@ -22,12 +22,36 @@ N = 20
 data0 = np.hstack(( di.poisson.rvs(10*exp(1), size=(N,1)), di.poisson.rvs(10*exp(2), size=(N,1)) ))
 data1 = np.hstack(( di.poisson.rvs(10*exp(2), size=(N,1)), di.poisson.rvs(10*exp(1), size=(N,1)) ))
 
-
 mpm = MixturePoissonSampler(data0, data1)
 np.random.seed(seedr)
-#s = samc.SAMCRun(mpm, burn=0, stepscale=1000, refden=1, thin=10)
-#s.sample(1e4, temperature=1)
-#print s.mapvalue
+
+########## SAMC #############
+n,gext,grid = get_grid_data(np.vstack(( data0, data1 )) )
+
+def myplot(ax,g):
+    ax.plot(data0[:,0], data0[:,1], 'go',label='0')
+    ax.plot(data1[:,0], data1[:,1], 'ro',label='1')
+    ax.legend(fontsize=8, loc='best')
+
+    im = ax.imshow(g, extent=gext, origin='lower')
+    p.colorbar(im,ax=ax)
+    ax.contour(g, [0.0], extent=gext, origin='lower', cmap = p.cm.gray)
+
+sb1 = p.subplot(2,1,1)
+sb2 = p.subplot(2,1,2)
+
+g = mpm.calc_curr_g(grid).reshape(-1,n)
+#s = samc.SAMCRun(mpm, burn=0, stepscale=1000, refden=1, thin=10, lim_iters=200)
+#s.sample(1e3, temperature=1)
+#gavg = mpm.calc_gavg(s.db, grid, 50).reshape(-1,n)
+gavg = mpm.calc_gavg(".tmp/samcPoCdx6", grid, 100).reshape(-1,n)
+
+myplot(sb1,gavg)
+myplot(sb2,g)
+
+p.show()
+sys.exit()
+########## /SAMC #############
 
 ########### NLOpt #############
 print mpm.energy()
@@ -76,24 +100,7 @@ print "Return: %d" %ret
 sys.exit()
 ########## /NLOpt #############
 
-p.plot(data0[:,0], data0[:,1], 'go')
-p.plot(data1[:,0], data1[:,1], 'ro')
-
-lx,hx,ly,hy = p.gca().axis()
-n,gext,grid = get_grid_data(np.vstack(( data0, data1 )) )
-
-#gavg = mpm.calc_gavg(s.db, grid, 50).reshape(-1,n)
-
-
-gavg = mpm.calc_gavg(".tmp/samcQ5VzMP", grid, 100).reshape(-1,n)
-    #def calc_g(self, pts, parts, mus, sigmas, ks, ws, ds):
-	#g = mpm.calc_g(np.ones((2,2)), np.ones(1), [np.zeros((2,4))], [np.eye(2)], [1], [np.ones(4)], [9])
-p.imshow(gavg, extent=gext, origin='lower')
-p.colorbar()
-p.contour(gavg, [0.0], extent=gext, origin='lower', cmap = p.cm.gray)
-		
-p.show()
-
+########## Profiling #############
 #import pstats, cProfile
 #cProfile.runctx("samc.SAMCRun(mpm, burn=0, stepscale=1000, thin=10)", globals(), locals(), "prof.prof")
 #cProfile.runctx("[mpm.energy() for i in xrange(1000)]", globals(), locals(), "prof.prof")
@@ -103,3 +110,4 @@ p.show()
 #s.strip_dirs().sort_stats("time").print_stats()
 #s.strip_dirs().sort_stats("cumtime").print_stats()
 
+########## /Profiling #############
