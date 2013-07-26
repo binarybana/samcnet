@@ -353,8 +353,8 @@ class GaussianCls(Classifier):
         # Expectation of C from page 3 eq. 1 using beta conjugate prior
         self.efactor = log(self.Ec) - log(1-self.Ec)
 
-    def calc_densities(self, grid, n, record):
-        return (self.dist0.fx.logpdf(grid) - self.dist1.fx.logpdf(grid) + self.efactor).reshape(grid_n, -1)
+    def calc_gavg(self, grid):
+        return self.dist0.fx.logpdf(grid) - self.dist1.fx.logpdf(grid) + self.efactor
 
     def approx_bayes(self, c, N=50000):
         pts0 = self.dist0.true_dist.gen_data(int(N*c))

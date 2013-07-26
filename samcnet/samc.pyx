@@ -63,8 +63,8 @@ cdef class SAMCRun:
                 self.obj.reject()
 
         spread = high - low
-        low = floor(low - (0.6 * spread))
-        high = ceil(high + (0.2 * spread))
+        low = int(floor(low - (0.6 * spread)))
+        high = int(ceil(high + (0.2 * spread)))
 
         print "Done. Setting limits to (%d, %d)" % (low,high)
 

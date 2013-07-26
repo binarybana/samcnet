@@ -114,8 +114,8 @@ cdef class MPMDist:
         self.D = data.shape[1]
 
         ##### Prior Quantities ######
-        self.kappa = 10
-        self.S = np.eye(self.D) * self.kappa
+        self.kappa = 100.0
+        self.S = np.eye(self.D) * self.kappa / 10
         self.comp_geom = 0.6
         self.priormu = np.ones(self.D)
         self.nu = 3.0
@@ -317,8 +317,6 @@ cdef class MPMDist:
                         accumcom += np.exp(dat*log(lam) - spec.gammaln(dat+1) - lam) * ws[i][m]
                     accumD += np.log(accumcom) 
             res += parts[i] * np.exp(accumD)
-        if parts.sum() == 0.0:
-            print parts, "Is zero!"
         return np.log(res / parts.sum())
 
     #cdef inline double logp_point(self, double pt, double lam, double d):
