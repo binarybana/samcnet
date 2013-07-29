@@ -71,6 +71,14 @@ def build(bld):
         target='samc')
 
     bld(features='c cshlib pyext',
+        source=['samcnet/mh.pyx'],
+        includes=[],
+        libpath=['.','./build'],
+        cflags=CFLAGS,
+        ldflags=LDFLAGS,
+        target='mh')
+
+    bld(features='c cshlib pyext',
         source=['samcnet/bayesnet.pyx'],
         includes=['samcnet/netcost'],
         use='cost',
