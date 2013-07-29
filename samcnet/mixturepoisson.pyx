@@ -46,7 +46,7 @@ def sample_invwishart(lmbda,dof):
     T = scipy.linalg.solve_triangular(R.T,chol.T,lower=True).T
     return np.dot(T,T.T)
 
-def logp_invwishart(mat, kappa, s):
+def logp_invwishart(mat, kappa, s, logdets):
     ''' Return log probability from an inverse wishart with
     DOF kappa, covariance matrix 'mat' and prior matrix 's' '''
     mat = np.asarray(mat)
@@ -57,11 +57,11 @@ def logp_invwishart(mat, kappa, s):
         mlgamma += lgamma(kappa/2 + (1-i+1)/2)
     return -(kappa+D+1)/2 * log(np.linalg.det(mat)) \
             - 0.5*np.trace(np.dot(s,np.linalg.inv(mat))) \
-            + kappa/2 * log(np.linalg.det(s)) \
+            + kappa/2 * logdets \
             - kappa*D/2 * log(2) \
             - D*(D-1)/4 * log(pi) * mlgamma
 
-def logp_normal(x, mu, sigma, nu=1.0):
+def logp_normal(x, mu, sigma, logdetsigma, invsigma, nu=1.0):
     ''' Return log probabilities from a multivariate normal with
     scaling parameter nu, mean mu, and covariance matrix sigma.'''
     x = np.asarray(x)
@@ -73,30 +73,34 @@ def logp_normal(x, mu, sigma, nu=1.0):
     else:
         axis = 0
     t1 = -0.5*k*log(2*pi) 
-    t2 = -0.5*log(np.linalg.det(sigma))
-    t3 = - nu/2 * (np.dot((x-mu), np.linalg.inv(sigma)) \
+    t2 = -0.5*logdetsigma
+    t3 = - nu/2 * (np.dot((x-mu), invsigma) \
             * (x-mu)).sum(axis=axis)
     return t1+t2+t3
 
 cdef class MPMParams:
     cdef public:
-        object mu, sigma, w, lam
+        object mu, sigma, w, lam, invsigma
         int k, d
-        double energy
+        double energy, logdetsigma
     def __init__(self,d,kmax):
         self.mu = np.empty((d,kmax), np.double)
         self.sigma = np.empty((d,d), np.double)
+        self.invsigma = np.empty((d,d), np.double)
         self.w = np.empty(kmax, np.double)
         self.lam = np.empty((d,kmax), np.double)
+        self.logdetsigma = 0.0
         self.energy = -inf
     cdef void set(MPMParams self, MPMParams other):
         self.mu[:] = other.mu
         self.sigma[:] = other.sigma
+        self.invsigma[:] = other.invsigma
         self.w[:] = other.w
         self.lam[:] = other.lam
         self.k = other.k
         self.d = other.d
         self.energy = other.energy
+        self.logdetsigma = other.logdetsigma
     def copy(self):
         return (self.mu.copy(), self.sigma.copy(), self.k, self.d, 
                 self.w.copy(), self.lam.copy(), self.energy)
@@ -106,21 +110,25 @@ cdef class MPMDist:
         MPMParams curr, old
         object data, S, priormu
         int D, kmax, n
-        double kappa, comp_geom, nu
+        double kappa, comp_geom, nu, green_factor, logdetS
 
-    def __init__(self, data):
+    def __init__(self, data, kappa=None, S=None, comp_geom=None, 
+            priormu=None, nu=None, kmax=None):
+        self.green_factor = 0.0
+
         self.data = data
         self.n = data.shape[0]
         self.D = data.shape[1]
 
         ##### Prior Quantities ######
-        self.kappa = 100.0
-        self.S = np.eye(self.D) * self.kappa / 10
-        self.comp_geom = 0.6
-        self.priormu = np.ones(self.D)
-        self.nu = 3.0
+        self.kappa = 100.0 if kappa is None else kappa
+        self.S = np.eye(self.D) * self.kappa / 20 + np.ones((self.D, self.D)) * self.kappa / 20 if S is None else S
+        self.logdetS = log(np.linalg.det(self.S))
+        self.comp_geom = 0.6 if comp_geom is None else comp_geom
+        self.priormu = np.ones(self.D) if priormu is None else priormu
+        self.nu = 3.0 if nu is None else nu
 
-        self.kmax = 4
+        self.kmax = 1 if kmax is None else kmax
         ######## Starting point of MCMC Run #######
         self.curr = MPMParams(self.D, self.kmax)
         self.old = MPMParams(self.D, self.kmax)
@@ -131,6 +139,8 @@ cdef class MPMDist:
         self.curr.mu = np.repeat(np.log(self.data.mean(axis=0)/self.curr.d).reshape(self.D,1),
                 self.kmax, axis=1)
         self.curr.sigma = sample_invwishart(self.S, self.kappa)
+        self.curr.logdetsigma = log(np.linalg.det(self.curr.sigma))
+        self.curr.invsigma = np.linalg.inv(self.curr.sigma)
         self.curr.w[:self.curr.k] = np.random.dirichlet((1,)*self.curr.k)
 
         for i in xrange(self.curr.k):
@@ -154,6 +164,8 @@ cdef class MPMDist:
         cdef MPMParams curr = self.curr
 
         scheme = np.random.randint(4)
+        if curr.k == 1 and curr.k == self.kmax:
+            scheme = np.clip(scheme,1,3)
         if scheme == 0:
             if curr.k > 1 and curr.k < self.kmax:
                 mod = np.random.choice((-1,1))
@@ -165,24 +177,31 @@ cdef class MPMDist:
                 curr.mu[:,curr.k] = curr.mu[:,curr.k-1]
                 curr.w *= 0.8
                 curr.w[curr.k] = 0.2
+                curr.lam[:,curr.k] = MVNormal(curr.mu[:,curr.k], curr.sigma).rvs(1)
                 curr.k += 1
+                #self.green_factor = FIXME
             else: # remove one
                 curr.w /= curr.w[:curr.k-1].sum()
                 curr.k -= 1
+                #self.green_factor = FIXME
 
         elif scheme == 1: # Modify weights
             curr.w[:curr.k] = np.random.dirichlet((1,)*curr.k)
+            #modify di's
+            curr.d += np.random.randn()*0.2
+            curr.d = np.clip(curr.d, 8,12)
 
         elif scheme == 2: # Modify means
-            curr.mu += np.random.randn(self.D, self.kmax)
+            curr.mu += np.random.randn(self.D, self.kmax) * 0.1
+
         elif scheme == 3: # Modify covariances
-            curr.sigma = sample_invwishart(np.eye(self.D), 5)
+            curr.sigma = sample_invwishart(self.S, self.kappa)
+            curr.invsigma = np.linalg.inv(curr.sigma)
+            curr.logdetsigma = log(np.linalg.det(curr.sigma))
         
-        #modify di's
-        curr.d += np.random.randn()*0.2
-        curr.d = np.clip(curr.d, 8,12)
         for i in xrange(self.curr.k):
-            curr.lam[:,i] = MVNormal(curr.mu[:,i], curr.sigma).rvs(1)
+            #curr.lam[:,i] = MVNormal(curr.mu[:,i], curr.sigma).rvs(1)
+            curr.lam[:,i] += np.random.randn(2)*0.1
         return scheme
 
     def reject(self):
@@ -222,7 +241,7 @@ cdef class MPMDist:
 
     def energy(self, force = False):
         if self.curr.energy != -inf and not force: # Cached 
-            return self.curr.energy
+            return self.curr.energy - self.green_factor
 
         cdef double lam,dat,accumdat,accumK,sum = 0.0
         cdef int i,j,m,d
@@ -234,7 +253,7 @@ cdef class MPMDist:
                 dat = self.data[j,d]
                 accumK = 0.0
                 if curr.k == 1:
-                    lam = curr.d*exp(curr.lam[d,m])
+                    lam = curr.d*exp(curr.lam[d,0])
                     accumdat += dat*log(lam) - lgamma(dat+1) - lam
                 else: # Looks like I'll be losing a lot of precision here
                     for m in xrange(curr.k):
@@ -245,14 +264,14 @@ cdef class MPMDist:
 
         #Now add in the priors...
         for i in xrange(curr.k):
-            sum -= logp_normal(curr.lam[:,i], curr.mu[:,i], curr.sigma, 1) #TODO check nu
-        sum -= logp_invwishart(curr.sigma, self.kappa, self.S)
+            sum -= logp_normal(curr.lam[:,i], curr.mu[:,i], curr.sigma, curr.logdetsigma, curr.invsigma) #TODO check nu
+        sum -= logp_invwishart(curr.sigma, self.kappa, self.S, self.logdetS)
         sum -= di.geom.logpmf(curr.k, self.comp_geom)
         for k in xrange(curr.k):
-            sum -= logp_normal(curr.mu[:,k], self.priormu, self.S, self.nu)
+            sum -= logp_normal(curr.mu[:,k], self.priormu, curr.sigma, curr.logdetsigma, curr.invsigma, self.nu)
 
         self.curr.energy = sum
-        return sum
+        return sum - self.green_factor
 
     def init_db(self, db, node, size):
         """ Takes a Pytables db and Group object (node) and the total number of samples expected and
@@ -278,14 +297,21 @@ cdef class MPMDist:
         db.d.append((self.curr.d,))
 
     def calc_db_g(self, db, node, pts, partial=None):
-        temp = db.root.samc.theta_trace.read()
-        parts = np.exp(temp - temp.max())
-        if partial:
-            inds = np.argsort(parts)[::-1][:partial]
-        else:
-            inds = np.arange(parts.size)
-        return self.calc_g(pts, parts[inds], node.lam.read()[inds],
-                node.k.read()[inds], node.w.read()[inds], node.d.read()[inds])
+        if db.root._v_attrs['mcmc_type'] == 'samc':
+            temp = db.root.samc.theta_trace.read()
+            parts = np.exp(temp - temp.max())
+            if partial:
+                inds = np.argsort(parts)[::-1][:partial]
+            else:
+                inds = np.arange(parts.size)
+            return self.calc_g(pts, parts[inds], node.lam.read()[inds],
+                    node.k.read()[inds], node.w.read()[inds], node.d.read()[inds])
+        elif db.root._v_attrs['mcmc_type'] == 'mh':
+            if partial:
+                print("Instead of a partial posterior sum calculation, why not take less samples?")
+            parts = np.ones(node.d.read().size)
+            return self.calc_g(pts, parts, node.lam.read(),
+                    node.k.read(), node.w.read(), node.d.read())
 
     def calc_curr_g(self, object pts):
         parts = np.array([1])
@@ -341,10 +367,9 @@ cdef class MPMCls:
         """
         self.lastmod = np.random.randint(2)
         if self.lastmod == 0:
-            scheme = self.dist0.propose()
+            return self.dist0.propose()
         elif self.lastmod == 1: 
-            scheme = self.dist1.propose()
-        return scheme
+            return self.dist1.propose()
 
     def reject(self):
         if self.lastmod == 0:
