@@ -3,6 +3,8 @@ import numpy as np
 import pylab as p
 import tables as t
 import samcnet.samc as samc
+import samcnet.mh as mh
+
 from samcnet.lori import *
 from math import exp,log
 
@@ -23,83 +25,116 @@ print "Seed is %d" % seedr
 #np.random.seed(seedd)
 np.random.seed(seedr)
 
-def myplot(ax,g):
+def myplot(ax,g,data0,data1):
     ax.plot(data0[:,0], data0[:,1], 'go',label='0')
     ax.plot(data1[:,0], data1[:,1], 'ro',label='1')
     ax.legend(fontsize=8, loc='best')
 
-    im = ax.imshow(g, extent=gext, origin='lower')
+    im = ax.imshow(g, extent=gext, aspect='equal', origin='lower')
     p.colorbar(im,ax=ax)
-    ax.contour(g, [0.0], extent=gext, origin='lower', cmap = p.cm.gray)
+    ax.contour(g, [0.0], extent=gext, aspect=1, origin='lower', cmap = p.cm.gray)
+
+########## Profiling #############
+#N = 20
+#data0 = np.vstack((
+    #np.hstack(( di.poisson.rvs(10*exp(1), size=(N,1)), di.poisson.rvs(10*exp(2), size=(N,1)) )),
+    #np.hstack(( di.poisson.rvs(10*exp(2.2), size=(N,1)), di.poisson.rvs(10*exp(2), size=(N,1)) )) ))
+#data1 = np.hstack(( di.poisson.rvs(10*exp(2), size=(N,1)), di.poisson.rvs(10*exp(1), size=(N,1)) ))
+#dist0 = MPMDist(data0)
+#dist1 = MPMDist(data1)
+#mpm = MPMCls(dist0, dist1) # TODO allow params input here (or maybe per class)
+#s2 = samc.SAMCRun(mpm, burn=0, stepscale=100, refden=1, thin=10, lim_iters=200)
+#s2.sample(1e4, temperature=20)
+#import pstats, cProfile
+#cProfile.runctx("samc.SAMCRun(mpm, burn=0, stepscale=1000, thin=10)", globals(), locals(), "prof.prof")
+#cProfile.runctx("[mpm.energy() for i in xrange(10000)]", globals(), locals(), "prof.prof")
+#cProfile.runctx("mpm.propose()", globals(), locals(), "prof.prof")
+
+#s = pstats.Stats("prof.prof")
+#s.strip_dirs().sort_stats("time").print_stats()
+#s.strip_dirs().sort_stats("cumtime").print_stats()
+
+#sys.exit()
+########## /Profiling #############
 
 ########## Comparison #############
 # Run Yousef/Jianping RNA Synthetic
 currdir = path.abspath('.')
 synloc = '/home/bana/GSP/research/samc/synthetic/rnaseq'
 os.chdir(synloc)
-sb.check_call(path.join(synloc, 
-    'RNASeq -o out -i params/easyparams -d 2 -m 1 -lr 9 -hr 10 -sr 0.05').split())
+#sb.check_call(path.join(synloc, 
+    #'gen -i params/easyparams -sr 0.05 -lr 9 -hr 10').split())
+#sb.check_call(path.join(synloc, 
+    #'cls -t out/trn.txt -s out/tst.txt').split())
 os.chdir(currdir)
 # Grab some info from the run
 data = np.loadtxt(path.join(synloc,'out','out'))
-lda,knn,svm = data[0:3]
+lda,knn,svm,num_feats = data[0:4]
 print("LDA error: %f" % lda)
 print("KNN error: %f" % knn)
 print("SVM error: %f" % svm)
+feat_inds = data[4:].astype(int)
 
-data = np.loadtxt(path.join(synloc, 'out','trn_norm.txt'),
-	delimiter=',')
-data0 = data[:30,:]
-data1 = data[30:,:]
-test = np.loadtxt(path.join(synloc, 'out','tst_norm.txt'),
-	delimiter=',')
+rawdata = np.loadtxt(path.join(synloc, 'out','trn.txt'),
+	delimiter=',', skiprows=1)
+data = rawdata[:,feat_inds]
+N = data.shape[0]
+data0 = data[:N/2,:]
+data1 = data[N/2:,:]
+norm_data = (data - data.mean(axis=0)) / np.sqrt(data.var(axis=0,ddof=1))
+norm_data0 = norm_data[:N/2,:]
+norm_data1 = norm_data[N/2:,:]
+rawtest = np.loadtxt(path.join(synloc, 'out','tst.txt'),
+	delimiter=',', skiprows=1)
+test = rawtest[:,feat_inds]
+norm_test = (test - test.mean(axis=0)) / np.sqrt(test.var(axis=0,ddof=1))
+N = test.shape[0]
 D = data.shape[1]
+#sys.exit()
 
-labels = np.hstack((np.zeros(500), np.ones(500)))
-n,gext,grid = get_grid_data(np.vstack(( data0, data1 )) )
+labels = np.hstack((np.zeros(N/2), np.ones(N/2)))
+n,gext,grid = get_grid_data(np.vstack(( norm_data0, norm_data1 )) )
 
-bayes0 = GaussianBayes(np.zeros(D), 1, 8, np.eye(D)*3, data0)
-bayes1 = GaussianBayes(np.zeros(D), 1, 8, np.eye(D)*3, data1)
+bayes0 = GaussianBayes(np.zeros(D), 1, 8, np.eye(D)*3, norm_data0)
+bayes1 = GaussianBayes(np.zeros(D), 1, 8, np.eye(D)*3, norm_data1)
 
 # Gaussian Analytic
 gc = GaussianCls(bayes0, bayes1)
-print("Gaussian Analytic error: %f" % gc.approx_error_data(test, labels))
+print("Gaussian Analytic error: %f" % gc.approx_error_data(norm_test, labels))
 gavg = gc.calc_gavg(grid).reshape(-1,n)
-myplot(p.subplot(2,3,1),gavg)
+myplot(p.subplot(2,3,1),gavg,norm_data0, norm_data1)
 
  #Gaussian Sampler
-#c = GaussianSampler(bayes0,bayes1,data0,data1)
+#c = GaussianSampler(bayes0,bayes1,norm_data0,norm_data1)
 #s1 = samc.SAMCRun(c, burn=0, stepscale=1000, refden=1, thin=10, lim_iters=200)
 #s1.sample(1e3, temperature=1)
-#print("Gaussian Sampler error: %f" % c.approx_error_data(s1.db, test, labels))
+#print("Gaussian Sampler error: %f" % c.approx_error_data(s1.db, norm_test, labels))
 #gavg = c.calc_gavg(s1.db, grid, 50).reshape(-1,n)
 #myplot(p.subplot(2,3,2),gavg)
 
 # MPM Model
-data = np.loadtxt(path.join(synloc, 'out','trn.txt'),
-	delimiter=',')
-test = np.loadtxt(path.join(synloc, 'out','tst.txt'),
-	delimiter=',')
-data0 = data[:30,:]
-data1 = data[30:,:]
 n,gext,grid = get_grid_data(np.vstack(( data0, data1 )) )
 
-dist0 = MPMDist(data0)
-dist1 = MPMDist(data1)
-mpm = MPMCls(dist0, dist1) # TODO allow params input here (or maybe per class)
-s2 = samc.SAMCRun(mpm, burn=0, stepscale=1000, refden=1, thin=10, lim_iters=200)
-s2.sample(1e3, temperature=1)
-print("MPM Sampler error: %f" % mpm.approx_error_data(s2.db, test, labels))
+dist0 = MPMDist(data0,kappa=5,S=np.eye(2)+np.ones((2,2))*3,kmax=2)
+dist1 = MPMDist(data1,kappa=5,S=np.eye(2)+np.ones((2,2))*3,kmax=2)
+mpm = MPMCls(dist0, dist1) 
+#s2 = samc.SAMCRun(mpm, burn=0, stepscale=1000, refden=1, thin=10, 
+	#lim_iters=100, low_margin=0.2, high_margin=-0.5)
+#s2.sample(2e5, temperature=2)
+mh = mh.MHRun(mpm, burn=0, thin=10)
+mh.sample(4e3,verbose=False)
+print("MPM Sampler error: %f" % mpm.approx_error_data(mh.db, test, labels))
 
-gavg = mpm.calc_gavg(s2.db, grid, 50).reshape(-1,n)
+gavg = mpm.calc_gavg(mh.db, grid).reshape(-1,n)
 #g = mpm.calc_curr_g(grid).reshape(-1,n)
-ga1 = mpm.dist0.calc_db_g(s2.db, s2.db.root.object.dist0, grid, 50).reshape(-1,n)
-ga2 = mpm.dist1.calc_db_g(s2.db, s2.db.root.object.dist1, grid, 50).reshape(-1,n)
+ga1 = mpm.dist0.calc_db_g(mh.db, mh.db.root.object.dist0, grid).reshape(-1,n)
+ga2 = mpm.dist1.calc_db_g(mh.db, mh.db.root.object.dist1, grid).reshape(-1,n)
 
-myplot(p.subplot(2,3,2),gavg)
-myplot(p.subplot(2,3,3),ga1)
-myplot(p.subplot(2,3,4),ga2)
-p.subplot(2,3,5)
+myplot(p.subplot(2,3,2),gavg,data0,data1)
+myplot(p.subplot(2,3,3),ga1,data0,data1)
+myplot(p.subplot(2,3,4),ga2,data0,data1)
+myplot(p.subplot(2,3,5),gavg,test[:500,:],test[500:,:])
+p.subplot(2,3,6)
 p.plot(test[:500,0], test[:500,1],'g.',alpha=0.5)
 p.plot(test[500:,0], test[500:,1],'r.',alpha=0.5)
 
@@ -186,14 +221,3 @@ print "Return: %d" %ret
 sys.exit()
 ########## /NLOpt #############
 
-########## Profiling #############
-#import pstats, cProfile
-#cProfile.runctx("samc.SAMCRun(mpm, burn=0, stepscale=1000, thin=10)", globals(), locals(), "prof.prof")
-#cProfile.runctx("[mpm.energy() for i in xrange(1000)]", globals(), locals(), "prof.prof")
-#cProfile.runctx("mpm.propose()", globals(), locals(), "prof.prof")
-
-#s = pstats.Stats("prof.prof")
-#s.strip_dirs().sort_stats("time").print_stats()
-#s.strip_dirs().sort_stats("cumtime").print_stats()
-
-########## /Profiling #############
