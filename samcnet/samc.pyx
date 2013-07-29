@@ -8,17 +8,18 @@ import tempfile
 import zlib
 import tables as t
 from itertools import izip
+from collections import Counter
 
 import numpy as np
 cimport numpy as np
 
 cdef class SAMCRun:
     cdef public:
-        object obj, db, refden, hist, mapvalue, verbose
+        object obj, db, refden, hist, mapvalue, verbose, scheme_counter
         int lowEnergy, highEnergy, grid, accept_loc, total_loc, iteration, burn, stepscale, thin
         double mapenergy, delta, scale, refden_power
     def __init__(self, obj, burn=100000, stepscale = 10000, refden=0.0, thin=1, verbose=False,
-            lim_iters=2000):
+            lim_iters=2000, low_margin=0.6, high_margin=0.2):
         self.verbose = verbose
         self.obj = obj # Going to be a BayesNet for now, but we'll keep it general
         self.clear()
@@ -31,9 +32,10 @@ cdef class SAMCRun:
 
         self.db = None
 
-        self.set_energy_limits(lim_iters)
+        self.set_energy_limits(lim_iters, low_margin, high_margin)
+        self.scheme_counter = Counter()
 
-    def set_energy_limits(self, int lim_iters):
+    def set_energy_limits(self, int lim_iters, low_margin, high_margin):
         cdef int i
         cdef double oldenergy, energy, low, high, spread
 
@@ -63,13 +65,14 @@ cdef class SAMCRun:
                 self.obj.reject()
 
         spread = high - low
-        low = int(floor(low - (0.6 * spread)))
-        high = int(ceil(high + (0.2 * spread)))
+        print("Energies of {} and {} found".format(low,high))
+        low = int(floor(low - (low_margin * spread)))
+        high = int(ceil(high + (high_margin * spread)))
 
         print "Done. Setting limits to (%d, %d)" % (low,high)
 
         spread = high - low
-        self.scale = max(0.25, spread/100.0)
+        self.scale = np.clip(spread/100.0, 0.25, 5)
         print "Setting scale to %f" % (self.scale)
 
         self.lowEnergy = <int>low
@@ -100,6 +103,7 @@ cdef class SAMCRun:
                 os.mkdir('.tmp')
             name = tempfile.mktemp(prefix='samc', dir='.tmp')
             self.db = t.openFile(name, mode = 'w', title='SAMC Run Data', filters=filt)
+            self.db.root._v_attrs["mcmc_type"] = 'samc'
 
             self.db.createGroup('/', 'samc', 'SAMC info', filters=filt)
             self.db.createEArray('/samc', 'theta_trace', t.Float64Atom(), (0,), expectedrows=size)
@@ -229,7 +233,7 @@ cdef class SAMCRun:
 
     #@cython.boundscheck(False) # turn off bounds-checking for entire function
     def sample(self, int iters, double temperature = 1.0, object verbose = False):
-        cdef int current_iter, accept, oldregion, newregion, i, nonempty, dbsize
+        cdef int current_iter, accept, oldregion, newregion, i, nonempty, dbsize, scheme
         cdef double oldenergy, newenergy, r, un
         cdef np.ndarray[np.int32_t, ndim=1, mode="c"] locfreq = \
                 np.zeros((self.grid,), dtype=np.int32)
@@ -252,7 +256,8 @@ cdef class SAMCRun:
 
             self.delta = temperature * float(self.stepscale) / max(self.stepscale, self.iteration)
 
-            self.obj.propose()
+            scheme = self.obj.propose()
+
             newenergy = self.obj.energy()
 
             if newenergy < self.mapenergy: # NB: Even if not accepted
@@ -267,6 +272,7 @@ cdef class SAMCRun:
             
             if r > 0.0 or np.random.rand() < exp(r):
                 accept=1
+                self.scheme_counter[scheme] += 1
             else:
                 accept=0;
             if verbose and self.iteration % 100 == 0:
