@@ -80,7 +80,7 @@ def logp_normal(x, mu, sigma, logdetsigma, invsigma, nu=1.0):
 
 cdef class MPMParams:
     cdef public:
-        object mu, sigma, w, lam, invsigma
+        np.ndarray mu, sigma, w, lam, invsigma
         int k, d
         double energy, logdetsigma
     def __init__(self,d,kmax):
@@ -108,7 +108,7 @@ cdef class MPMParams:
 cdef class MPMDist:
     cdef public:
         MPMParams curr, old
-        object data, S, priormu
+        np.ndarray data, S, priormu
         int D, kmax, n
         double kappa, comp_geom, nu, green_factor, logdetS
 
@@ -122,11 +122,11 @@ cdef class MPMDist:
 
         ##### Prior Quantities ######
         self.kappa = 100.0 if kappa is None else kappa
-        self.S = np.eye(self.D) * self.kappa / 20 + np.ones((self.D, self.D)) * self.kappa / 20 if S is None else S
+        self.S = np.eye(self.D) * self.kappa / 20 if S is None else S
         self.logdetS = log(np.linalg.det(self.S))
         self.comp_geom = 0.6 if comp_geom is None else comp_geom
         self.priormu = np.ones(self.D) if priormu is None else priormu
-        self.nu = 3.0 if nu is None else nu
+        self.nu = 1.0 if nu is None else nu
 
         self.kmax = 1 if kmax is None else kmax
         ######## Starting point of MCMC Run #######
@@ -152,8 +152,8 @@ cdef class MPMDist:
     def propose(self):
         """ 
         We do one of a couple of things:
-        0) Modify number of mixture components (k)
-        1) Modify weights of mixture components (w)
+        0) Modify weights of mixture components (w)
+        1) Modify number of mixture components (k)
         2) Modify means of mixture components (mu)
         3) Modify covariance matrices (sigma)
         On every step modify d and pick new lambda values
@@ -163,10 +163,22 @@ cdef class MPMDist:
         self.curr.energy = -inf
         cdef MPMParams curr = self.curr
 
-        scheme = np.random.randint(4)
+        cdef int Nschemes = 3
         if curr.k == 1 and curr.k == self.kmax:
-            scheme = np.clip(scheme,1,3)
-        if scheme == 0:
+            scheme = np.random.randint(2,Nschemes+1)
+        elif curr.k == 1:
+            scheme = np.random.randint(1,Nschemes+1)
+        else:
+            scheme = np.random.randint(Nschemes+1)
+
+        if scheme == 0: # Modify weights
+            curr.w[:curr.k] = curr.w[:curr.k] + np.random.randn(curr.k)
+            curr.w[:curr.k] = curr.w[:curr.k] / curr.w[:curr.k].sum()
+            #modify di's
+            #curr.d += np.random.randn()*0.2
+            #curr.d = np.clip(curr.d, 8,12)
+
+        if scheme == 1:
             if curr.k > 1 and curr.k < self.kmax:
                 mod = np.random.choice((-1,1))
             elif curr.k == 1:
@@ -177,7 +189,6 @@ cdef class MPMDist:
                 curr.mu[:,curr.k] = curr.mu[:,curr.k-1]
                 curr.w *= 0.8
                 curr.w[curr.k] = 0.2
-                curr.lam[:,curr.k] = MVNormal(curr.mu[:,curr.k], curr.sigma).rvs(1)
                 curr.k += 1
                 #self.green_factor = FIXME
             else: # remove one
@@ -185,23 +196,26 @@ cdef class MPMDist:
                 curr.k -= 1
                 #self.green_factor = FIXME
 
-        elif scheme == 1: # Modify weights
-            curr.w[:curr.k] = np.random.dirichlet((1,)*curr.k)
-            #modify di's
-            curr.d += np.random.randn()*0.2
-            curr.d = np.clip(curr.d, 8,12)
-
         elif scheme == 2: # Modify means
             curr.mu += np.random.randn(self.D, self.kmax) * 0.1
 
         elif scheme == 3: # Modify covariances
             curr.sigma = sample_invwishart(self.S, self.kappa)
+            #posdef = False
+            #while not posdef: # Warning, this could be extremely slow...
+                #curr.sigma += np.random.randn(self.D,self.D)*0.1
+                #try:
+                    #np.linalg.cholesky(curr.sigma)
+                    #posdef = True
+                #except np.linalg.LinAlgError:
+                    #continue
+
             curr.invsigma = np.linalg.inv(curr.sigma)
             curr.logdetsigma = log(np.linalg.det(curr.sigma))
         
         for i in xrange(self.curr.k):
-            #curr.lam[:,i] = MVNormal(curr.mu[:,i], curr.sigma).rvs(1)
             curr.lam[:,i] += np.random.randn(2)*0.1
+            #curr.lam[:,i] = MVNormal(curr.mu[:,i], curr.sigma).rvs(1)
         return scheme
 
     def reject(self):
@@ -265,10 +279,10 @@ cdef class MPMDist:
         #Now add in the priors...
         for i in xrange(curr.k):
             sum -= logp_normal(curr.lam[:,i], curr.mu[:,i], curr.sigma, curr.logdetsigma, curr.invsigma) #TODO check nu
-        sum -= logp_invwishart(curr.sigma, self.kappa, self.S, self.logdetS)
+        #sum -= logp_invwishart(curr.sigma, self.kappa, self.S, self.logdetS)
         sum -= di.geom.logpmf(curr.k, self.comp_geom)
-        for k in xrange(curr.k):
-            sum -= logp_normal(curr.mu[:,k], self.priormu, curr.sigma, curr.logdetsigma, curr.invsigma, self.nu)
+        #for k in xrange(curr.k):
+            #sum -= logp_normal(curr.mu[:,k], self.priormu, curr.sigma, curr.logdetsigma, curr.invsigma, self.nu)
 
         self.curr.energy = sum
         return sum - self.green_factor
@@ -285,16 +299,16 @@ cdef class MPMDist:
         db.createEArray(node, 'w', t.Float64Atom(shape=(self.kmax,)), (0,), expectedrows=size)
         db.createEArray(node, 'd', t.Float64Atom(), (0,), expectedrows=size)
 
-    def save_iter_db(self, db):
+    def save_iter_db(self, db, node):
         """ Saves objective function (and possible samples depending on verbosity) to
         Pytables db group object
         """ 
-        db.mu.append((self.curr.mu,))
-        db.lam.append((self.curr.lam,))
-        db.sigma.append((self.curr.sigma,))
-        db.k.append((self.curr.k,))
-        db.w.append((self.curr.w,))
-        db.d.append((self.curr.d,))
+        node.mu.append((self.curr.mu,))
+        node.lam.append((self.curr.lam,))
+        node.sigma.append((self.curr.sigma,))
+        node.k.append((self.curr.k,))
+        node.w.append((self.curr.w,))
+        node.d.append((self.curr.d,))
 
     def calc_db_g(self, db, node, pts, partial=None):
         if db.root._v_attrs['mcmc_type'] == 'samc':
@@ -402,23 +416,23 @@ cdef class MPMCls:
     def energy(self):
         return self.dist0.energy(self.numlam) + self.dist1.energy(self.numlam)
 
-    def init_db(self, db, size):
+    def init_db(self, db, node, size):
         """ Takes a Pytables db and the total number of samples expected and
         expands or creates the necessary groups.
         """
         filt = t.Filters(complib='bzip2', complevel=7, fletcher32=True)
-        db.createGroup('/object', 'dist0', 'Dist0 trace', filters=filt)
-        db.createGroup('/object', 'dist1', 'Dist1 trace', filters=filt)
-        db.root.object._v_attrs['c'] = self.Ec
-        self.dist0.init_db(db, db.root.object.dist0, size)
-        self.dist1.init_db(db, db.root.object.dist1, size)
+        db.createGroup(node, 'dist0', 'Dist0 trace', filters=filt)
+        db.createGroup(node, 'dist1', 'Dist1 trace', filters=filt)
+        node._v_attrs['c'] = self.Ec
+        self.dist0.init_db(db, node.dist0, size)
+        self.dist1.init_db(db, node.dist1, size)
 
-    def save_iter_db(self, db):
+    def save_iter_db(self, db, node):
         """ Saves objective function (and possible samples depending on verbosity) to
         Pytables db
         """ 
-        self.dist0.save_iter_db(db.root.object.dist0)
-        self.dist1.save_iter_db(db.root.object.dist1)
+        self.dist0.save_iter_db(db, node.dist0)
+        self.dist1.save_iter_db(db, node.dist1)
 
     def approx_error_data(self, db, data, labels, partial=False):
         preds = self.calc_gavg(db, data, partial) < 0
@@ -439,3 +453,23 @@ cdef class MPMCls:
         efactor = log(self.Ec) - log(1-self.Ec)
         return g0 - g1 + efactor
 
+#cpdef int bench1(int N):
+    #cdef int i
+    #x = di.poisson(10).rvs(20).astype(np.double)
+    #for i in xrange(N):
+        #test_method(x)
+
+#cpdef int bench2(int N):
+    #cdef int i
+    #cdef double [:] x = di.poisson(10).rvs(20).astype(np.double)
+    #for i in xrange(N):
+        #test_method(x)
+
+#def benchp(N):
+    #cdef int i
+    #x = di.poisson(10).rvs(20).astype(np.double)
+    #for i in xrange(N):
+        #test_method(x)
+
+#cpdef double [:] test_method(double[:] arr):
+    #return di.poisson.logpmf(arr, 10.0)
