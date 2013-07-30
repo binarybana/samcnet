@@ -93,7 +93,7 @@ D = data.shape[1]
 #sys.exit()
 
 labels = np.hstack((np.zeros(N/2), np.ones(N/2)))
-n,gext,grid = get_grid_data(np.vstack(( norm_data0, norm_data1 )) )
+n,gext,grid = get_grid_data(np.vstack(( norm_data0, norm_data1 )))
 
 bayes0 = GaussianBayes(np.zeros(D), 1, 8, np.eye(D)*3, norm_data0)
 bayes1 = GaussianBayes(np.zeros(D), 1, 8, np.eye(D)*3, norm_data1)
@@ -113,16 +113,16 @@ myplot(p.subplot(2,3,1),gavg,norm_data0, norm_data1)
 #myplot(p.subplot(2,3,2),gavg)
 
 # MPM Model
-n,gext,grid = get_grid_data(np.vstack(( data0, data1 )) )
+n,gext,grid = get_grid_data(np.vstack(( data0, data1 )), positive=True)
 
-dist0 = MPMDist(data0,kappa=5,S=np.eye(2)+np.ones((2,2))*3,kmax=2)
-dist1 = MPMDist(data1,kappa=5,S=np.eye(2)+np.ones((2,2))*3,kmax=2)
+dist0 = MPMDist(data0,kappa=5,S=np.eye(2)+np.ones((2,2))*3,kmax=1)
+dist1 = MPMDist(data1,kappa=5,S=np.eye(2)+np.ones((2,2))*3,kmax=1)
 mpm = MPMCls(dist0, dist1) 
 #s2 = samc.SAMCRun(mpm, burn=0, stepscale=1000, refden=1, thin=10, 
 	#lim_iters=100, low_margin=0.2, high_margin=-0.5)
 #s2.sample(2e5, temperature=2)
 mh = mh.MHRun(mpm, burn=0, thin=10)
-mh.sample(4e3,verbose=False)
+mh.sample(1e3,verbose=False)
 print("MPM Sampler error: %f" % mpm.approx_error_data(mh.db, test, labels))
 
 gavg = mpm.calc_gavg(mh.db, grid).reshape(-1,n)
