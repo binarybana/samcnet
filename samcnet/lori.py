@@ -559,7 +559,7 @@ class GaussianSampler(Classifier):
 def get_grid_cls(cls):
     samples = np.vstack((cls.dist0.gen_data(30), cls.dist1.gen_data(30)))
 
-def get_grid_data(samples):
+def get_grid_data(samples, positive=False):
     lx,hx,ly,hy = np.vstack((samples.min(axis=0), samples.max(axis=0))).T.flatten()
     xspread, yspread = hx-lx, hy-ly
     n = 30
@@ -567,6 +567,9 @@ def get_grid_data(samples):
     hx += xspread * 0.2
     ly -= yspread * 0.2
     hy += yspread * 0.2
+    if positive:
+        lx = np.clip(lx, 0, np.inf)
+        ly = np.clip(ly, 0, np.inf)
     gextent = (lx,hx,ly,hy)
     grid = np.dstack(np.meshgrid(
                     np.linspace(lx,hx,n),
