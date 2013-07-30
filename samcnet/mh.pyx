@@ -53,7 +53,7 @@ cdef class MHRun:
             samples = self.db.createGroup(objdb, 'samples', 'Samples')
             objfxn = self.db.createGroup(objdb, 'objfxn', 'Objective function outputs')
 
-            self.obj.init_db(self.db, size)
+            self.obj.init_db(self.db, self.db.root.object, size)
 
     def read_db(self):
         assert self.db.isopen == 1, "DB not open!"
@@ -70,7 +70,7 @@ cdef class MHRun:
 
     def save_iter_db(self, double energy, int iteration):
         self.db.root.mh.energy_trace.append((energy,))
-        self.obj.save_iter_db(self.db)
+        self.obj.save_iter_db(self.db, self.db.root.object)
 
     def save_state_db(self):
         mhroot = self.db.root.mh

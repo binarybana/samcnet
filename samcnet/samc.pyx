@@ -116,7 +116,7 @@ cdef class SAMCRun:
             objfxn = self.db.createGroup(objdb, 'objfxn', 'Objective function outputs')
             self.db.root.samc._v_attrs.temperature = []
 
-            self.obj.init_db(self.db, size)
+            self.obj.init_db(self.db, self.db.root.object, size)
 
     def read_db(self):
         assert self.db.isopen == 1, "DB not open!"
@@ -135,7 +135,7 @@ cdef class SAMCRun:
         self.db.root.samc.theta_trace.append((theta,))
         self.db.root.samc.energy_trace.append((energy,))
 
-        self.obj.save_iter_db(self.db)
+        self.obj.save_iter_db(self.db, self.db.root.object)
 
     def save_state_db(self, last_temperature):
         samcroot = self.db.root.samc
