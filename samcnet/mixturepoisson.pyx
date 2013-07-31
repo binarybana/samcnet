@@ -152,54 +152,48 @@ cdef class MPMDist:
     def propose(self):
         """ 
         We do one of a couple of things:
-        0) Modify weights of mixture components (w)
-        1) Modify number of mixture components (k)
-        2) Modify means of mixture components (mu)
-        3) Modify covariance matrices (sigma)
-        On every step modify d and pick new lambda values
+        0) Add mixture component (birth)
+        1) Remove mixture component (death)
+        2) Modify parameters (w, mu, sigma, d)
         """
         cdef int i
         self.old.set(self.curr)
         self.curr.energy = -inf
         cdef MPMParams curr = self.curr
 
-        cdef int Nschemes = 3
         if curr.k == 1 and curr.k == self.kmax:
-            scheme = np.random.randint(2,Nschemes+1)
+            scheme = 2
         elif curr.k == 1:
-            scheme = np.random.randint(1,Nschemes+1)
+            scheme = np.random.choice(range(3), p=[1./8, 0, 7./8])
+        elif curr.k == self.kmax:
+            scheme = np.random.choice(range(3), p=[0, 1./8, 7./8])
         else:
-            scheme = np.random.randint(Nschemes+1)
+            scheme = np.random.randint(3)
 
-        if scheme == 0: # Modify weights
+        if scheme == 0: # birth
+            curr.mu[:,curr.k] = curr.mu[:,curr.k-1]
+            curr.w *= 0.8
+            curr.w[curr.k] = 0.2
+            curr.k += 1
+            #self.green_factor = FIXME
+
+        elif scheme == 1: # death
+            curr.w /= curr.w[:curr.k-1].sum()
+            curr.k -= 1
+            #self.green_factor = FIXME
+
+        elif scheme == 2:  # modify params
+            # Modify means
+            curr.mu += np.random.randn(self.D, self.kmax) * 0.1
+
             curr.w[:curr.k] = curr.w[:curr.k] + np.random.randn(curr.k)
             curr.w[:curr.k] = curr.w[:curr.k] / curr.w[:curr.k].sum()
+
             #modify di's
             #curr.d += np.random.randn()*0.2
             #curr.d = np.clip(curr.d, 8,12)
 
-        if scheme == 1:
-            if curr.k > 1 and curr.k < self.kmax:
-                mod = np.random.choice((-1,1))
-            elif curr.k == 1:
-                mod = 1
-            else:
-                mod = -1
-            if mod == 1: # Add one
-                curr.mu[:,curr.k] = curr.mu[:,curr.k-1]
-                curr.w *= 0.8
-                curr.w[curr.k] = 0.2
-                curr.k += 1
-                #self.green_factor = FIXME
-            else: # remove one
-                curr.w /= curr.w[:curr.k-1].sum()
-                curr.k -= 1
-                #self.green_factor = FIXME
-
-        elif scheme == 2: # Modify means
-            curr.mu += np.random.randn(self.D, self.kmax) * 0.1
-
-        elif scheme == 3: # Modify covariances
+            # Modify covariances
             curr.sigma = sample_invwishart(self.S, self.kappa)
             #posdef = False
             #while not posdef: # Warning, this could be extremely slow...
