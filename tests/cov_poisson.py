@@ -36,19 +36,19 @@ kappa = 10
 S = np.eye(2) * kappa
 dist = MPMDist(ps,kappa=kappa,S=S,kmax=1)
 mh = mh.MHRun(dist, burn=0, thin=10)
-mh.sample(2e3,verbose=False)
+mh.sample(1e2,verbose=False)
 
 gavg = dist.calc_db_g(mh.db, mh.db.root.object, grid).reshape(-1,n)
 
-p.subplot(3,1,1)
+p.subplot(2,2,1)
 p.imshow(gavg, extent=gext, aspect=1, origin='lower')
-#p.colorbar()
+p.colorbar()
 p.plot(ps[:,0], ps[:,1], 'k.')
 
 def log_poisson(k,lam):
 	return log(lam) * k - gammaln(k+1) - lam
 
-p.subplot(3,1,2)
+p.subplot(2,2,2)
 ######### avg avg
 mus = mh.db.root.object.mu.read()
 sigmas = mh.db.root.object.sigma.read()
@@ -76,7 +76,7 @@ p.plot(ps[:,0], ps[:,1], 'k.')
 #p.imshow(mlg, extent=gext, aspect=1, origin='lower')
 #p.plot(ps[:,0], ps[:,1], 'k.')
 
-p.subplot(3,1,3)
+p.subplot(2,2,3)
 ######## avg lambda
 mapmu, mapsigma = mh.mapvalue[:2]
 
@@ -99,20 +99,49 @@ from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 from matplotlib.ticker import LinearLocator, FormatStrFormatter
 
-fig = p.figure()
-ax = fig.gca(projection='3d')
-X = np.linspace(gext[0], gext[1], n)
-Y = np.linspace(gext[0], gext[1], n)
-X, Y = np.meshgrid(X, Y)
-surf = ax.plot_surface(X, Y, avglg, rstride=1, cstride=1, cmap=cm.coolwarm,
-        linewidth=0, antialiased=False)
-#ax.set_zlim(-1.01, 1.01)
-#ax.zaxis.set_major_locator(LinearLocator(10))
-#ax.zaxis.set_major_formatter(FormatStrFormatter('%.02f'))
+#fig = p.figure()
+#ax = fig.gca(projection='3d')
+#X = np.linspace(gext[0], gext[1], n)
+#Y = np.linspace(gext[0], gext[1], n)
+#X, Y = np.meshgrid(X, Y)
+#surf = ax.plot_surface(X, Y, avglg, rstride=1, cstride=1, cmap=cm.coolwarm,
+        #linewidth=0, antialiased=False)
+#fig = p.figure()
+#ax = fig.gca(projection='3d')
+#surf = ax.plot_surface(X, Y, avgavg, rstride=1, cstride=1, cmap=cm.coolwarm,
+        #linewidth=0, antialiased=False)
 
-fig = p.figure()
-ax = fig.gca(projection='3d')
-surf = ax.plot_surface(X, Y, avgavg, rstride=1, cstride=1, cmap=cm.coolwarm,
-        linewidth=0, antialiased=False)
+############ STAN ###############
+
+from samcnet.utils import stan_vec
+open('../stan/data.R','w').write(stan_vec(
+	samples=ps.astype(np.int), 
+	num_samples=ps.shape[0], 
+	num_features=2,
+	nu = 5,
+	S = 5*np.array([[1,-0.9],[-0.9,1]]),
+	#S = 4*np.eye(2),
+	prior_mu = np.zeros(2),
+	lowd = 9,
+	highd = 10))
+os.chdir('../stan')
+sb.check_call( 
+    './mpm --data=data.R --iter=5000 --warmup=1000 --refresh=1000 --samples=samples2.csv'.split())
+os.chdir('../samcnet')
+stan_samps = np.genfromtxt('../stan/samples2.csv', names=True, skip_header=25, delimiter=',')
+N = stan_samps.shape[0]
+lam = np.vstack(( stan_samps['lam1'], stan_samps['lam2'] )).T
+d = stan_samps['d']
+avglg = np.zeros(grid.shape[0])
+for i in xrange(N):
+	avglg[:] += np.exp(log_poisson(grid[:,0], d[i]*np.exp(lam[i,0])) \
+				+ log_poisson(grid[:,1], d[i]*np.exp(lam[i,1])))
+avglg /= N
+avglg = np.log(avglg).reshape(-1,n)
+
+p.subplot(2,2,4)
+p.imshow(avglg, extent=gext, aspect=1, origin='lower')
+#p.colorbar()
+p.plot(ps[:,0], ps[:,1], 'k.')
 
 p.show()

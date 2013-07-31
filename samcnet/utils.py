@@ -86,6 +86,21 @@ def _plot_SAMC(energy, theta, counts, energy_trace, theta_trace, burn):
     p.xlabel('exp(theta - theta_max)')
     p.ylabel('Amount of weight at this value')
 
+def stan_vec(**vecs):
+    s = ''
+    for k,v in vecs.iteritems():
+        if type(v) == np.ndarray:
+            if v.ndim == 1:
+                s += k + ' <- c' + str(tuple(v)) + '\n'
+            else:
+                s += k + ' <- structure(c'+str(tuple(v.T.flatten())) + ', .Dim = c' + str(v.shape) + ')\n'
+        else:
+            s += k + ' <- ' + str(v) + '\n'
+    return s
+
+if __name__ == '__main__':
+    print(stan_vec(a=[1,2,3], b=np.arange(16).reshape(4,4), c=np.arange(10), d=4.5 ))
+
 #def plot_nodes(loc, node, parts=[0.0, 0.1, 0.2]):
     #filelist = os.listdir(loc)
     #n = len(filelist)
