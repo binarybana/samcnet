@@ -78,6 +78,9 @@ def logp_normal(x, mu, sigma, logdetsigma, invsigma, nu=1.0):
             * (x-mu)).sum(axis=axis)
     return t1+t2+t3
 
+cpdef logp_uni_normal(x, mu, sigma): # Only up to a proportionality constant
+    return (x-mu)*(x-mu)/sigma - 0.5*log(sigma)
+
 cdef class MPMParams:
     cdef public:
         np.ndarray mu, sigma, w, lam, invsigma
@@ -108,12 +111,12 @@ cdef class MPMParams:
 cdef class MPMDist:
     cdef public:
         MPMParams curr, old
-        np.ndarray data, S, priormu
+        np.ndarray data, S, priormu, priorsigma
         int D, kmax, n
-        double kappa, comp_geom, nu, green_factor, logdetS
+        double kappa, comp_geom, green_factor, logdetS
 
     def __init__(self, data, kappa=None, S=None, comp_geom=None, 
-            priormu=None, nu=None, kmax=None):
+            priormu=None, priorsigma=None, kmax=None):
         self.green_factor = 0.0
 
         self.data = data
@@ -126,7 +129,7 @@ cdef class MPMDist:
         self.logdetS = log(np.linalg.det(self.S))
         self.comp_geom = 0.6 if comp_geom is None else comp_geom
         self.priormu = np.ones(self.D) if priormu is None else priormu
-        self.nu = 1.0 if nu is None else nu
+        self.priorsigma = np.ones(self.D)*4.0 if priorsigma is None else priorsigma
 
         self.kmax = 1 if kmax is None else kmax
         ######## Starting point of MCMC Run #######
@@ -190,8 +193,8 @@ cdef class MPMDist:
             curr.w[:curr.k] = curr.w[:curr.k] / curr.w[:curr.k].sum()
 
             #modify di's
-            #curr.d += np.random.randn()*0.2
-            #curr.d = np.clip(curr.d, 8,12)
+            curr.d += np.random.randn()*0.2
+            curr.d = np.clip(curr.d, 8,12)
 
             # Modify covariances
             curr.sigma = sample_invwishart(self.S, self.kappa)
@@ -208,8 +211,8 @@ cdef class MPMDist:
             curr.logdetsigma = log(np.linalg.det(curr.sigma))
         
         for i in xrange(self.curr.k):
-            curr.lam[:,i] += np.random.randn(2)*0.1
-            #curr.lam[:,i] = MVNormal(curr.mu[:,i], curr.sigma).rvs(1)
+            #curr.lam[:,i] += np.random.randn(2)*0.1
+            curr.lam[:,i] = MVNormal(curr.mu[:,i], curr.sigma).rvs(1)
         return scheme
 
     def reject(self):
@@ -272,11 +275,13 @@ cdef class MPMDist:
 
         #Now add in the priors...
         for i in xrange(curr.k):
-            sum -= logp_normal(curr.lam[:,i], curr.mu[:,i], curr.sigma, curr.logdetsigma, curr.invsigma) #TODO check nu
-        #sum -= logp_invwishart(curr.sigma, self.kappa, self.S, self.logdetS)
+            sum -= logp_normal(curr.lam[:,i], curr.mu[:,i], curr.sigma, 
+                    curr.logdetsigma, curr.invsigma) 
+        sum -= logp_invwishart(curr.sigma, self.kappa, self.S, self.logdetS)
         sum -= di.geom.logpmf(curr.k, self.comp_geom)
-        #for k in xrange(curr.k):
-            #sum -= logp_normal(curr.mu[:,k], self.priormu, curr.sigma, curr.logdetsigma, curr.invsigma, self.nu)
+        for k in xrange(curr.k):
+            for i in xrange(self.D):
+                sum -= logp_uni_normal(curr.mu[i,k], self.priormu[i], self.priorsigma[i])
 
         self.curr.energy = sum
         return sum - self.green_factor
