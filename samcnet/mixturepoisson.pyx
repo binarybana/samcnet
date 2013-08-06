@@ -21,6 +21,7 @@ import scipy.special as spec
 from scipy.special import betaln
 
 from statsmodels.sandbox.distributions.mv_normal import MVT,MVNormal
+import nlopt
 
 cdef extern from "math.h":
     double log2(double)
@@ -61,20 +62,22 @@ def logp_invwishart(mat, kappa, s, logdets):
             - kappa*D/2 * log(2) \
             - D*(D-1)/4 * log(pi) * mlgamma
 
-def logp_normal(x, mu, sigma, logdetsigma, invsigma, nu=1.0):
+cpdef double logp_normal(np.ndarray x, np.ndarray mu, np.ndarray sigma, 
+        double logdetsigma, np.ndarray invsigma, double nu=1.0):
     ''' Return log probabilities from a multivariate normal with
     scaling parameter nu, mean mu, and covariance matrix sigma.'''
-    x = np.asarray(x)
-    mu = np.asarray(mu)
-    sigma = np.asarray(sigma)
-    k = mu.size
+    #x = np.asarray(x)
+    #mu = np.asarray(mu)
+    #sigma = np.asarray(sigma)
+    cdef int k = mu.size
+    cdef int axis
     if x.ndim > 1:
         axis = 1
     else:
         axis = 0
-    t1 = -0.5*k*log(2*pi) 
-    t2 = -0.5*logdetsigma
-    t3 = - nu/2 * (np.dot((x-mu), invsigma) \
+    cdef double t1 = -0.5*k*log(2*pi) 
+    cdef double t2 = -0.5*logdetsigma
+    cdef double t3 = - nu/2 * (np.dot((x-mu), invsigma) \
             * (x-mu)).sum(axis=axis)
     return t1+t2+t3
 
@@ -83,15 +86,16 @@ cpdef logp_uni_normal(x, mu, sigma): # Only up to a proportionality constant
 
 cdef class MPMParams:
     cdef public:
-        np.ndarray mu, sigma, w, lam, invsigma
-        int k, d
+        np.ndarray mu, sigma, w, lam, invsigma, d
+        int k
         double energy, logdetsigma
-    def __init__(self,d,kmax):
-        self.mu = np.empty((d,kmax), np.double)
-        self.sigma = np.empty((d,d), np.double)
-        self.invsigma = np.empty((d,d), np.double)
+    def __init__(self,D,kmax,numsamps):
+        self.mu = np.empty((D,kmax), np.double)
+        self.sigma = np.empty((D,D), np.double)
+        self.invsigma = np.empty((D,D), np.double)
         self.w = np.empty(kmax, np.double)
-        self.lam = np.empty((d,kmax), np.double)
+        self.lam = np.empty((D,kmax,numsamps), np.double)
+        self.d = np.empty(numsamps, np.double)
         self.logdetsigma = 0.0
         self.energy = -inf
     cdef void set(MPMParams self, MPMParams other):
@@ -101,11 +105,11 @@ cdef class MPMParams:
         self.w[:] = other.w
         self.lam[:] = other.lam
         self.k = other.k
-        self.d = other.d
+        self.d[:] = other.d
         self.energy = other.energy
         self.logdetsigma = other.logdetsigma
     def copy(self):
-        return (self.mu.copy(), self.sigma.copy(), self.k, self.d, 
+        return (self.mu.copy(), self.sigma.copy(), self.k, self.d.copy(), 
                 self.w.copy(), self.lam.copy(), self.energy)
 
 cdef class MPMDist:
@@ -133,21 +137,21 @@ cdef class MPMDist:
 
         self.kmax = 1 if kmax is None else kmax
         ######## Starting point of MCMC Run #######
-        self.curr = MPMParams(self.D, self.kmax)
-        self.old = MPMParams(self.D, self.kmax)
+        self.curr = MPMParams(self.D, self.kmax, self.n)
+        self.old = MPMParams(self.D, self.kmax, self.n)
 
         self.curr.k = 1
-        self.curr.d = 10
+        self.curr.d = 10 * np.ones(self.n)
 
-        self.curr.mu = np.repeat(np.log(self.data.mean(axis=0)/self.curr.d).reshape(self.D,1),
+        self.curr.mu = np.repeat(np.log(self.data.mean(axis=0)/self.curr.d.mean()).reshape(self.D,1),
                 self.kmax, axis=1)
         self.curr.sigma = sample_invwishart(self.S, self.kappa)
         self.curr.logdetsigma = log(np.linalg.det(self.curr.sigma))
         self.curr.invsigma = np.linalg.inv(self.curr.sigma)
         self.curr.w[:self.curr.k] = np.random.dirichlet((1,)*self.curr.k)
 
-        for i in xrange(self.curr.k):
-            self.curr.lam[:,i] = MVNormal(self.curr.mu[:,i], self.curr.sigma).rvs(1)
+        tempdat = np.log(np.clip(data.T/self.curr.d, 0.1, np.inf)).T
+        self.curr.lam = np.repeat(tempdat.T[:,np.newaxis,:], self.kmax, axis=1)
 
     def copy(self):
         return self.curr.copy()
@@ -157,7 +161,7 @@ cdef class MPMDist:
         We do one of a couple of things:
         0) Add mixture component (birth)
         1) Remove mixture component (death)
-        2) Modify parameters (w, mu, sigma, d)
+        2) Modify parameters (w, mu, sigma, d, lam)
         """
         cdef int i
         self.old.set(self.curr)
@@ -193,8 +197,8 @@ cdef class MPMDist:
             curr.w[:curr.k] = curr.w[:curr.k] / curr.w[:curr.k].sum()
 
             #modify di's
-            curr.d += np.random.randn()*0.2
-            curr.d = np.clip(curr.d, 8,12)
+            #curr.d += np.random.randn(self.n)*0.2
+            #np.clip(curr.d, 8,12, out=curr.d)
 
             # Modify covariances
             curr.sigma = sample_invwishart(self.S, self.kappa)
@@ -210,9 +214,8 @@ cdef class MPMDist:
             curr.invsigma = np.linalg.inv(curr.sigma)
             curr.logdetsigma = log(np.linalg.det(curr.sigma))
         
-        for i in xrange(self.curr.k):
-            #curr.lam[:,i] += np.random.randn(2)*0.1
-            curr.lam[:,i] = MVNormal(curr.mu[:,i], curr.sigma).rvs(1)
+            for i in xrange(curr.k):
+                curr.lam[:,i,:] += np.random.randn(self.D, self.n)*0.05
         return scheme
 
     def reject(self):
@@ -264,21 +267,29 @@ cdef class MPMDist:
                 dat = self.data[j,d]
                 accumK = 0.0
                 if curr.k == 1:
-                    lam = curr.d*exp(curr.lam[d,0])
+                    lam = curr.d[j]*exp(curr.lam[d,0,j])
                     accumdat += dat*log(lam) - lgamma(dat+1) - lam
                 else: # Looks like I'll be losing a lot of precision here
                     for m in xrange(curr.k):
-                        lam = curr.d*exp(curr.lam[d,m])
+                        lam = curr.d[j]*exp(curr.lam[d,m,j])
                         accumK += exp(dat*log(lam) - lgamma(dat+1) - lam) * curr.w[m]
                     accumdat += log(accumK) 
         sum -= accumdat
 
         #Now add in the priors...
-        for i in xrange(curr.k):
-            sum -= logp_normal(curr.lam[:,i], curr.mu[:,i], curr.sigma, 
-                    curr.logdetsigma, curr.invsigma) 
+        # Lambdas
+        for j in xrange(self.n):
+            for i in xrange(curr.k):
+                sum -= logp_normal(curr.lam[:,i,j], curr.mu[:,i], curr.sigma, 
+                        curr.logdetsigma, curr.invsigma) 
+
+        # Sigma
         sum -= logp_invwishart(curr.sigma, self.kappa, self.S, self.logdetS)
+
+        # k
         sum -= di.geom.logpmf(curr.k, self.comp_geom)
+
+        # mu
         for k in xrange(curr.k):
             for i in xrange(self.D):
                 sum -= logp_uni_normal(curr.mu[i,k], self.priormu[i], self.priorsigma[i])
@@ -292,11 +303,11 @@ cdef class MPMDist:
         """
         D = self.D
         db.createEArray(node, 'mu', t.Float64Atom(shape=(D,self.kmax)), (0,), expectedrows=size)
-        db.createEArray(node, 'lam', t.Float64Atom(shape=(D,self.kmax)), (0,), expectedrows=size)
+        db.createEArray(node, 'lam', t.Float64Atom(shape=(D,self.kmax,self.n)), (0,), expectedrows=size)
         db.createEArray(node, 'sigma', t.Float64Atom(shape=(D,D)), (0,), expectedrows=size)
         db.createEArray(node, 'k', t.Int64Atom(), (0,), expectedrows=size)
         db.createEArray(node, 'w', t.Float64Atom(shape=(self.kmax,)), (0,), expectedrows=size)
-        db.createEArray(node, 'd', t.Float64Atom(), (0,), expectedrows=size)
+        db.createEArray(node, 'd', t.Float64Atom(shape=(self.n,)), (0,), expectedrows=size)
 
     def save_iter_db(self, db, node):
         """ Saves objective function (and possible samples depending on verbosity) to
@@ -309,7 +320,7 @@ cdef class MPMDist:
         node.w.append((self.curr.w,))
         node.d.append((self.curr.d,))
 
-    def calc_db_g(self, db, node, pts, partial=None):
+    def calc_db_g(self, db, node, pts, partial=None, numlam=10):
         if db.root._v_attrs['mcmc_type'] == 'samc':
             temp = db.root.samc.theta_trace.read()
             parts = np.exp(temp - temp.max())
@@ -317,46 +328,50 @@ cdef class MPMDist:
                 inds = np.argsort(parts)[::-1][:partial]
             else:
                 inds = np.arange(parts.size)
-            return self.calc_g(pts, parts[inds], node.lam.read()[inds],
-                    node.k.read()[inds], node.w.read()[inds], node.d.read()[inds])
+            return self.calc_g(pts, parts[inds], node.mu.read()[inds],
+                    node.sigma.read()[inds], node.k.read()[inds], 
+                    node.w.read()[inds], node.d.read()[inds], numlam)
         elif db.root._v_attrs['mcmc_type'] == 'mh':
             if partial:
                 print("Instead of a partial posterior sum calculation, why not take less samples?")
-            parts = np.ones(node.d.read().size)
-            return self.calc_g(pts, parts, node.lam.read(),
-                    node.k.read(), node.w.read(), node.d.read())
+            parts = np.ones(node.k.read().shape[0])
+            return self.calc_g(pts, parts, node.mu.read(),
+                    node.sigma.read(), node.k.read(), node.w.read(), node.d.read(), numlam)
 
-    def calc_curr_g(self, object pts):
+    def calc_curr_g(self, object pts, numlam=10):
         parts = np.array([1])
-        return self.calc_g(pts, parts, [self.curr.lam],
-                [self.curr.k], [self.curr.w], [self.curr.d])
+        return self.calc_g(pts, parts, [self.curr.mu], [self.curr.sigma],
+                [self.curr.k], [self.curr.w], [self.curr.d], numlam)
 
-    def calc_g(self, pts, parts, lams, ks, ws, ds):
+    def calc_g(self, pts, parts, mus, sigmas, ks, ws, ds, numlam):
         """ Returns weighted (parts) average logp for all pts """
-        cdef int i,m,d
+        cdef int i,m,d,s
+        cdef double dmean, lam
+        cdef np.ndarray dat, Z
         numpts = pts.shape[0]
         res = np.zeros(numpts)
         accumD = np.zeros(numpts)
         accumcom = np.zeros(numpts)
+        accumlam = np.zeros(numpts)
+        numlam = 10
         for i in range(parts.size):
             numcom = int(ks[i])
             accumD[:] = 0
-            for d in xrange(self.D):
-                if numcom == 1:
-                    dat = pts[:,d]
-                    lam = ds[i]*exp(lams[i][d,0])
-                    accumD += dat*log(lam) 
-                    accumD -= spec.gammaln(dat+1) 
-                    accumD -= lam
-                else:
-                    accumcom[:] = 0
-                    for m in xrange(numcom):
-                        dat = pts[:,d]
-                        lam = ds[i]*exp(lams[i][d,m])
-                        accumcom += np.exp(dat*log(lam) - spec.gammaln(dat+1) - lam) * ws[i][m]
-                    accumD += np.log(accumcom) 
+            lams = np.dstack(( MVNormal(mus[i][:,m], sigmas[i]).rvs(numlam) for m in xrange(numcom)))
+            dmean = ds[i].mean() # TODO, this should probably be input or something
+            for d in xrange(self.D): #FIXME There is a bug somewhere in here...
+                accumcom[:] = 0
+                dat = pts[:,d]
+                Z = spec.gammaln(dat+1)
+                for m in xrange(numcom):
+                    accumlam[:] = 0
+                    for s in xrange(numlam):
+                        lam = dmean*exp(lams[s,d,m])
+                        accumlam += np.exp(dat*log(lam) - lam - Z) 
+                    accumcom += accumlam/numlam * ws[i][m]
+                accumD += np.log(accumcom) 
             res += parts[i] * np.exp(accumD)
-        return np.log(res / parts.sum())
+        return np.log(res / parts.sum()), lams
 
     #cdef inline double logp_point(self, double pt, double lam, double d):
         #return pt*(log(d)+lam) - lgamma(pt+1) - lam
