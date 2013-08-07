@@ -21,7 +21,6 @@ import scipy.special as spec
 from scipy.special import betaln
 
 from statsmodels.sandbox.distributions.mv_normal import MVT,MVNormal
-import nlopt
 
 cdef extern from "math.h":
     double log2(double)
@@ -117,10 +116,10 @@ cdef class MPMDist:
         MPMParams curr, old
         np.ndarray data, S, priormu, priorsigma
         int D, kmax, n
-        double kappa, comp_geom, green_factor, logdetS
+        double kappa, comp_geom, green_factor, logdetS, priorkappa
 
     def __init__(self, data, kappa=None, S=None, comp_geom=None, 
-            priormu=None, priorsigma=None, kmax=None):
+            priormu=None, priorsigma=None, kmax=None, priorkappa=None):
         self.green_factor = 0.0
 
         self.data = data
@@ -128,7 +127,8 @@ cdef class MPMDist:
         self.D = data.shape[1]
 
         ##### Prior Quantities ######
-        self.kappa = 100.0 if kappa is None else kappa
+        self.kappa = 10.0 if kappa is None else kappa
+        self.priorkappa = 10.0 if priorkappa is None else priorkappa
         self.S = np.eye(self.D) * self.kappa / 20 if S is None else S
         self.logdetS = log(np.linalg.det(self.S))
         self.comp_geom = 0.6 if comp_geom is None else comp_geom
@@ -201,21 +201,18 @@ cdef class MPMDist:
             #np.clip(curr.d, 8,12, out=curr.d)
 
             # Modify covariances
-            curr.sigma = sample_invwishart(self.S, self.kappa)
-            #posdef = False
-            #while not posdef: # Warning, this could be extremely slow...
-                #curr.sigma += np.random.randn(self.D,self.D)*0.1
-                #try:
-                    #np.linalg.cholesky(curr.sigma)
-                    #posdef = True
-                #except np.linalg.LinAlgError:
-                    #continue
+            curr.sigma = sample_invwishart(curr.sigma * self.priorkappa, self.priorkappa)
+            #curr.sigma += np.random.randn(self.D,self.D)*0.1
+            #try:
+                #np.linalg.cholesky(curr.sigma)
+            #except np.linalg.LinAlgError:
+                #curr.sigma = sample_invwishart(self.S, self.kappa)
 
             curr.invsigma = np.linalg.inv(curr.sigma)
             curr.logdetsigma = log(np.linalg.det(curr.sigma))
         
-            for i in xrange(curr.k):
-                curr.lam[:,i,:] += np.random.randn(self.D, self.n)*0.05
+            #for i in xrange(curr.k):
+                #curr.lam[:,i,:] += np.random.randn(self.D, self.n)*0.05
         return scheme
 
     def reject(self):
@@ -356,22 +353,34 @@ cdef class MPMDist:
         numlam = 10
         for i in range(parts.size):
             numcom = int(ks[i])
-            accumD[:] = 0
-            lams = np.dstack(( MVNormal(mus[i][:,m], sigmas[i]).rvs(numlam) for m in xrange(numcom)))
             dmean = ds[i].mean() # TODO, this should probably be input or something
-            for d in xrange(self.D): #FIXME There is a bug somewhere in here...
-                accumcom[:] = 0
-                dat = pts[:,d]
-                Z = spec.gammaln(dat+1)
-                for m in xrange(numcom):
-                    accumlam[:] = 0
-                    for s in xrange(numlam):
+            lams = np.dstack(( MVNormal(mus[i][:,m], sigmas[i]).rvs(numlam) for m in xrange(numcom) ))
+            accumlam[:] = 0
+            for s in xrange(numlam):
+                accumD[:] = 1
+                for d in xrange(self.D): 
+                    accumcom[:] = 0
+                    dat = pts[:,d]
+                    Z = spec.gammaln(dat+1)
+                    for m in xrange(numcom):
                         lam = dmean*exp(lams[s,d,m])
-                        accumlam += np.exp(dat*log(lam) - lam - Z) 
-                    accumcom += accumlam/numlam * ws[i][m]
-                accumD += np.log(accumcom) 
-            res += parts[i] * np.exp(accumD)
+                        accumcom += np.exp(dat*log(lam) - lam - Z) * ws[i][m]
+                    accumD *= accumcom
+                accumlam += accumD / numlam
+            res += parts[i] * accumlam
         return np.log(res / parts.sum()), lams
+
+    def plot_traces(self, db, node, names=None):
+        for curr in db.getNode(node):
+            if issubclass(type(curr), t.Array):
+                if names is None or curr.name in names:
+                    p.figure()
+                    data = curr.read()
+                    data = data.reshape(data.shape[0], -1)
+                    for i in xrange(data.shape[1]):
+                        p.plot(data[:,i], label=str(i))
+                    p.legend(loc='best', fontsize=8)
+                    p.title(curr.name)
 
     #cdef inline double logp_point(self, double pt, double lam, double d):
         #return pt*(log(d)+lam) - lgamma(pt+1) - lam

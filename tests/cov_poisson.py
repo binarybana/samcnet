@@ -11,7 +11,6 @@ from math import exp,log
 import scipy.stats as st
 import scipy.stats.distributions as di
 import scipy
-import nlopt
 import subprocess as sb
 import os
 import os.path as path
@@ -25,46 +24,65 @@ def log_poisson(k,lam):
 
 ######## PARAMS ########
 numlam = 10
-kappa = 8
-#S = np.eye(2) * kappa
-S = np.array([[1,.9],[.9,1]]) * kappa
+kappa = 5
+priorkappa = 20
+S = np.eye(2) * kappa
+#S = np.array([[1,-.9],[-.9,1]]) * kappa
 prior_mu = np.zeros(2) + 0 
 prior_sigma = np.ones(2) + 3
 ######## /PARAMS ########
 
 ######## Generate Data ########
-rho = 0.93
+def gen_data(mu, cov, n):
+    lams = MVNormal(mu, cov).rvs(n)
+    ps = np.empty_like(lams)
+    for i in xrange(lams.shape[0]):
+	for j in xrange(lams.shape[1]):
+	    ps[i,j] = di.poisson.rvs(10* np.exp(lams[i,j]))
+    return ps
+
+rho = 0.0
 cov = np.array([[1, rho],[rho, 1]])
+mu = np.zeros(2)
 
-lams = MVNormal(np.zeros(2), cov).rvs(30)
-ps = np.empty_like(lams)
-for i in xrange(lams.shape[0]):
-    for j in xrange(lams.shape[1]):
-	ps[i,j] = di.poisson.rvs(10* np.exp(lams[i,j]))
+rseed = np.random.randint(1000)
+dseed = 1000
+#dseed = np.random.randint(1000)
 
-#lams = MVNormal(np.ones(2), cov).rvs(1)
-#ps = np.vstack(( di.poisson.rvs(9* np.exp(lams[0,0]), size=30),
-    #di.poisson.rvs(9* np.exp(lams[0,1]), size=30)  )).T
+print("rseed: %d" % rseed)
+print("dseed: %d" % dseed)
+np.random.seed(dseed)
+ps = gen_data(mu,cov,30)
+superps = gen_data(mu,cov,3000)
+np.random.seed(rseed)
 
 n,gext,grid = get_grid_data(ps, positive=True)
 ######## /Generate Data ########
 
 ######## MH Samples ########
-dist = MPMDist(ps,kappa=kappa,S=S,priormu=prior_mu,priorsigma=prior_sigma,kmax=1)
-#mh = mh.MHRun(dist, burn=100, thin=4)
-#iters = 1e3
-#t1=time()
-#mh.sample(iters,verbose=False)
-#print "%d MH iters took %f seconds" % (iters, time()-t1)
+dist = MPMDist(ps,kappa=kappa,S=S,priormu=prior_mu,priorsigma=prior_sigma,
+	priorkappa=priorkappa,kmax=1)
+mh = mh.MHRun(dist, burn=100, thin=4)
+iters = 1e3
+t1=time()
+mh.sample(iters,verbose=False)
+print "%d MH iters took %f seconds" % (iters, time()-t1)
 
-#gavg = dist.calc_db_g(mh.db, mh.db.root.object, grid).reshape(-1,n)
-gavg,plams = dist.calc_curr_g(grid, numlam=3)
+gavg,plams = dist.calc_db_g(mh.db, mh.db.root.object, grid)
+#gavg,plams = dist.calc_curr_g(grid, numlam=3)
 gavg = gavg.reshape(-1,n)
 
-#p.subplot(2,2,1)
+p.subplot(2,1,1)
 p.imshow(gavg, extent=gext, aspect=1, origin='lower')
 p.colorbar()
 p.plot(ps[:,0], ps[:,1], 'k.')
+
+p.subplot(2,1,2)
+p.imshow(gavg, extent=gext, aspect=1, origin='lower')
+p.colorbar()
+p.plot(superps[:,0], superps[:,1], 'k.', alpha=0.1)
+
+dist.plot_traces(mh.db, mh.db.root.object, names=('sigma','mu','lam'))
 ######## /MH Samples ########
 
 ######## Lambda subsampled MH Samples ########
