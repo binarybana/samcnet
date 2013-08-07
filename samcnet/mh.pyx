@@ -152,9 +152,8 @@ cdef class MHRun:
                 self.scheme_counter[scheme] += 1
             else:
                 accept=0;
-            if verbose and self.iteration % 100 == 0:
-                #print(self.obj.info())
-                print(r)
+            if verbose and self.iteration % 10 == 0:
+                print("old: %8.2f, new: %8.2f, r: %5.2f, accept: %d" % (oldenergy, newenergy, r, accept))
 
             if accept == 0:
                 self.obj.reject()
