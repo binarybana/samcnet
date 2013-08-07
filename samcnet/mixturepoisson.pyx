@@ -127,12 +127,12 @@ cdef class MPMDist:
         self.D = data.shape[1]
 
         ##### Prior Quantities ######
-        self.kappa = 10.0 if kappa is None else kappa
-        self.priorkappa = 10.0 if priorkappa is None else priorkappa
-        self.S = np.eye(self.D) * self.kappa / 20 if S is None else S
+        self.kappa = 5.0 if kappa is None else kappa
+        self.priorkappa = 20.0 if priorkappa is None else priorkappa
+        self.S = np.eye(self.D) * self.kappa if S is None else S
         self.logdetS = log(np.linalg.det(self.S))
         self.comp_geom = 0.6 if comp_geom is None else comp_geom
-        self.priormu = np.ones(self.D) if priormu is None else priormu
+        self.priormu = np.zeros(self.D) if priormu is None else priormu
         self.priorsigma = np.ones(self.D)*4.0 if priorsigma is None else priorsigma
 
         self.kmax = 1 if kmax is None else kmax
@@ -145,7 +145,7 @@ cdef class MPMDist:
 
         self.curr.mu = np.repeat(np.log(self.data.mean(axis=0)/self.curr.d.mean()).reshape(self.D,1),
                 self.kmax, axis=1)
-        self.curr.sigma = sample_invwishart(self.S, self.kappa)
+        self.curr.sigma = self.S.copy()
         self.curr.logdetsigma = log(np.linalg.det(self.curr.sigma))
         self.curr.invsigma = np.linalg.inv(self.curr.sigma)
         self.curr.w[:self.curr.k] = np.random.dirichlet((1,)*self.curr.k)
@@ -368,7 +368,7 @@ cdef class MPMDist:
                     accumD *= accumcom
                 accumlam += accumD / numlam
             res += parts[i] * accumlam
-        return np.log(res / parts.sum()), lams
+        return np.log(res / parts.sum())
 
     def plot_traces(self, db, node, names=None):
         for curr in db.getNode(node):
