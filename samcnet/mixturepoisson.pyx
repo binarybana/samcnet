@@ -389,14 +389,13 @@ cdef class MPMCls:
     cdef public:
         MPMDist dist0, dist1
         double Ec
-        int numlam, lastmod  # Lastmod is a dirty flag that also tells us where we're dirty
+        int lastmod  # Lastmod is a dirty flag that also tells us where we're dirty
 
-    def __init__(self, dist0, dist1, numlam=100):
+    def __init__(self, dist0, dist1):
         self.dist0 = dist0
         self.dist1 = dist1
         assert self.dist0.D == self.dist1.D, "Datasets must be of same featuresize"
         self.Ec = self.dist0.n / (self.dist0.n + self.dist1.n)
-        self.numlam = numlam
 
     def propose(self):
         """ 
@@ -437,7 +436,7 @@ cdef class MPMCls:
         return (self.dist0.copy(), self.dist1.copy())
 
     def energy(self):
-        return self.dist0.energy(self.numlam) + self.dist1.energy(self.numlam)
+        return self.dist0.energy() + self.dist1.energy()
 
     def init_db(self, db, node, size):
         """ Takes a Pytables db and the total number of samples expected and
@@ -457,22 +456,22 @@ cdef class MPMCls:
         self.dist0.save_iter_db(db, node.dist0)
         self.dist1.save_iter_db(db, node.dist1)
 
-    def approx_error_data(self, db, data, labels, partial=False):
-        preds = self.calc_gavg(db, data, partial) < 0
+    def approx_error_data(self, db, data, labels, partial=False, numlam=10):
+        preds = self.calc_gavg(db, data, partial, numlam=numlam) < 0
         return np.abs(preds-labels).sum()/float(labels.shape[0])
 
-    def calc_gavg(self, db, pts, partial=False, cls=None):
+    def calc_gavg(self, db, pts, partial=False, numlam=10):
         if type(db) == str:
             db = t.openFile(db,'r')
-        g0 = self.dist0.calc_db_g(db, db.root.object.dist0, pts, partial)
-        g1 = self.dist1.calc_db_g(db, db.root.object.dist1, pts, partial)
+        g0 = self.dist0.calc_db_g(db, db.root.object.dist0, pts, partial, numlam=numlam)
+        g1 = self.dist1.calc_db_g(db, db.root.object.dist1, pts, partial, numlam=numlam)
         Ec = db.root.object._v_attrs['c']
         efactor = log(Ec) - log(1-Ec)
         return g0 - g1 + efactor
 
-    def calc_curr_g(self, pts):
-        g0 = self.dist0.calc_curr_g(pts)
-        g1 = self.dist1.calc_curr_g(pts)
+    def calc_curr_g(self, pts, numlam=10):
+        g0 = self.dist0.calc_curr_g(pts, numlam)
+        g1 = self.dist1.calc_curr_g(pts, numlam)
         efactor = log(self.Ec) - log(1-self.Ec)
         return g0 - g1 + efactor
 
