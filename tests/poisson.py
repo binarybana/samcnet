@@ -185,13 +185,15 @@ mpm = MPMCls(dist0, dist1)
 	#lim_iters=100, low_margin=0.2, high_margin=-0.5)
 #s2.sample(2e5, temperature=2)
 mh = mh.MHRun(mpm, burn=100, thin=20)
-mh.sample(3e3,verbose=False)
+mh.sample(5e3,verbose=False)
 print("MPM Sampler error: %f" % mpm.approx_error_data(mh.db, test, labels))
 
-gavg = mpm.calc_gavg(mh.db, grid, numlam=100).reshape(-1,n)
+numlam = 200
+
+gavg = mpm.calc_gavg(mh.db, grid, numlam=numlam).reshape(-1,n)
 #g = mpm.calc_curr_g(grid).reshape(-1,n)
-ga1 = mpm.dist0.calc_db_g(mh.db, mh.db.root.object.dist0, grid).reshape(-1,n)
-ga2 = mpm.dist1.calc_db_g(mh.db, mh.db.root.object.dist1, grid).reshape(-1,n)
+ga1 = mpm.dist0.calc_db_g(mh.db, mh.db.root.object.dist0, grid, numlam=numlam).reshape(-1,n)
+ga2 = mpm.dist1.calc_db_g(mh.db, mh.db.root.object.dist1, grid, numlam=numlam).reshape(-1,n)
 
 myplot(p.subplot(2,3,2),gavg,data0,data1)
 myplot(p.subplot(2,3,3),ga1,data0,data1)

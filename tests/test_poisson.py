@@ -1,6 +1,5 @@
 import os
 import sys
-from time import time
 
 try:
     from samcnet.mixturepoisson import *
@@ -50,8 +49,8 @@ cov0 = sample_invwishart(np.eye(D)*10, 10)
 cov1 = sample_invwishart(np.eye(D)*10, 10)
 
 rseed = np.random.randint(10**6)
-#dseed = 1
-dseed = np.random.randint(1000)
+dseed = 1
+#dseed = np.random.randint(1000)
 
 print("rseed: %d" % rseed)
 print("dseed: %d" % dseed)
@@ -61,8 +60,8 @@ print("dseed: %d" % dseed)
 trn_data0 = gen_data(mu0,cov0,30)
 trn_data1 = gen_data(mu1,cov1,30)
 
-tst_data0 = gen_data(mu0,cov0,3000)
-tst_data1 = gen_data(mu1,cov1,3000)
+tst_data0 = gen_data(mu0,cov0,300)
+tst_data1 = gen_data(mu1,cov1,300)
 
 #np.random.seed(rseed)
 
@@ -110,14 +109,10 @@ print("Gaussian Analytic error: %f" % output['gausserr'])
 dist0 = MPMDist(trn_data0,kmax=1)
 dist1 = MPMDist(trn_data1,kmax=1)
 mpm = MPMCls(dist0, dist1) 
-mh = mh.MHRun(mpm, burn=100, thin=20)
-t1=time()
-iters = 3e3
-numlam = 100
-mh.sample(iters,verbose=False)
-output['mpmerr'] = mpm.approx_error_data(mh.db, tst_data, tst_labels,numlam=numlam)
+mh = mh.MHRun(mpm, burn=1, thin=2)
+mh.sample(40,verbose=False)
+output['mpmerr'] = mpm.approx_error_data(mh.db, tst_data, tst_labels,numlam=200)
 print("MPM Sampler error: %f" % output['mpmerr'])
-print "Whole run with %d iters and %d numlam took %f seconds" % (iters, numlam, time()-t1)
 
 if 'WORKHASH' in os.environ:
     import zmq,time,zlib

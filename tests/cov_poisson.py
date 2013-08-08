@@ -41,7 +41,7 @@ def gen_data(mu, cov, n):
 	    ps[i,j] = di.poisson.rvs(10* np.exp(lams[i,j]))
     return ps
 
-rho = 0.0
+rho = -0.4
 cov = np.array([[1, rho],[rho, 1]])
 mu = np.zeros(2)
 
@@ -62,15 +62,17 @@ n,gext,grid = get_grid_data(ps, positive=True)
 ######## MH Samples ########
 dist = MPMDist(ps,kappa=kappa,S=S,priormu=prior_mu,priorsigma=prior_sigma,
 	priorkappa=priorkappa,kmax=1)
-mh = mh.MHRun(dist, burn=100, thin=4)
-iters = 1e3
+mh = mh.MHRun(dist, burn=100, thin=20)
+iters = 5e3
 t1=time()
 mh.sample(iters,verbose=False)
 print "%d MH iters took %f seconds" % (iters, time()-t1)
 
-gavg,plams = dist.calc_db_g(mh.db, mh.db.root.object, grid)
-#gavg,plams = dist.calc_curr_g(grid, numlam=3)
-gavg = gavg.reshape(-1,n)
+numlam=100
+t1=time()
+gavg = dist.calc_db_g(mh.db, mh.db.root.object, grid, numlam=numlam).reshape(-1,n)
+print "Generating gavg using numlam %d took %f seconds" % (numlam, time()-t1)
+#gavg = dist.calc_curr_g(grid, numlam=3).reshape(-1,n)
 
 p.subplot(2,1,1)
 p.imshow(gavg, extent=gext, aspect=1, origin='lower')
@@ -82,7 +84,7 @@ p.imshow(gavg, extent=gext, aspect=1, origin='lower')
 p.colorbar()
 p.plot(superps[:,0], superps[:,1], 'k.', alpha=0.1)
 
-dist.plot_traces(mh.db, mh.db.root.object, names=('sigma','mu','lam'))
+#dist.plot_traces(mh.db, mh.db.root.object, names=('sigma','mu','lam'))
 ######## /MH Samples ########
 
 ######## Lambda subsampled MH Samples ########
