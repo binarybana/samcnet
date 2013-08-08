@@ -340,17 +340,19 @@ cdef class MPMDist:
         return self.calc_g(pts, parts, [self.curr.mu], [self.curr.sigma],
                 [self.curr.k], [self.curr.w], [self.curr.d], numlam)
 
-    def calc_g(self, pts, parts, mus, sigmas, ks, ws, ds, numlam):
+    def calc_g(self, pts_raw, parts, mus, sigmas, ks, ws, ds, numlam):
         """ Returns weighted (parts) average logp for all pts """
-        cdef int i,m,d,s
-        cdef double dmean, lam
-        cdef np.ndarray dat, Z
-        numpts = pts.shape[0]
-        res = np.zeros(numpts)
-        accumD = np.zeros(numpts)
-        accumcom = np.zeros(numpts)
-        accumlam = np.zeros(numpts)
-        numlam = 10
+        cdef int i,m,d,s,j,numpts,numcom
+        cdef double dmean, lam, loglam
+        numpts = pts_raw.shape[0]
+        cdef np.ndarray[np.double_t, ndim=2, mode="c"] pts = np.array(pts_raw, copy=True, order='c')
+        cdef np.ndarray[np.double_t, ndim=1, mode="c"] res = np.zeros(numpts)
+        cdef np.ndarray[np.double_t, ndim=1, mode="c"] accumD = np.zeros(numpts)
+        cdef np.ndarray[np.double_t, ndim=1, mode="c"] accumcom = np.zeros(numpts)
+        cdef np.ndarray[np.double_t, ndim=1, mode="c"] accumlam = np.zeros(numpts)
+        cdef np.ndarray[np.double_t, ndim=2, mode="c"] Z = spec.gammaln(pts+1)
+        cdef np.ndarray[np.double_t, ndim=2, mode="c"] wsfast = np.vstack(ws)
+        cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams 
         for i in range(parts.size):
             numcom = int(ks[i])
             dmean = ds[i].mean() # TODO, this should probably be input or something
@@ -360,11 +362,11 @@ cdef class MPMDist:
                 accumD[:] = 1
                 for d in xrange(self.D): 
                     accumcom[:] = 0
-                    dat = pts[:,d]
-                    Z = spec.gammaln(dat+1)
                     for m in xrange(numcom):
                         lam = dmean*exp(lams[s,d,m])
-                        accumcom += np.exp(dat*log(lam) - lam - Z) * ws[i][m]
+                        loglam = log(lam)
+                        for j in xrange(numpts):
+                            accumcom[j] += exp(pts[j,d]*loglam - lam - Z[j,d]) * wsfast[i,m]
                     accumD *= accumcom
                 accumlam += accumD / numlam
             res += parts[i] * accumlam
