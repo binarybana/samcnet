@@ -107,8 +107,8 @@ output['gausserr'] = gc.approx_error_data(norm_tst_data, tst_labels)
 print("Gaussian Analytic error: %f" % output['gausserr'])
 
 # MPM Model
-dist0 = MPMDist(trn_data0,kmax=1)
-dist1 = MPMDist(trn_data1,kmax=1)
+dist0 = MPMDist(trn_data0,kmax=2)
+dist1 = MPMDist(trn_data1,kmax=2)
 mpm = MPMCls(dist0, dist1) 
 mh = mh.MHRun(mpm, burn=100, thin=20)
 t1=time()

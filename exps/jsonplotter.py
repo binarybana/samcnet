@@ -22,4 +22,4 @@ for fname in os.listdir(resdir):
 
 df = pa.DataFrame(output)
 
-print(df.summarize())
+print(df.describe())

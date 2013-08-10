@@ -286,3 +286,21 @@ sys.exit()
 #sys.exit()
 ########## /NLOpt #############
 
+######## 3D Plot ########
+#from mpl_toolkits.mplot3d import Axes3D
+#from matplotlib import cm
+#from matplotlib.ticker import LinearLocator, FormatStrFormatter
+
+#fig = p.figure()
+#ax = fig.gca(projection='3d')
+#X = np.linspace(gext[0], gext[1], n)
+#Y = np.linspace(gext[0], gext[1], n)
+#X, Y = np.meshgrid(X, Y)
+#surf = ax.plot_surface(X, Y, avglg, rstride=1, cstride=1, cmap=cm.coolwarm,
+	#linewidth=0, antialiased=False)
+#fig = p.figure()
+#ax = fig.gca(projection='3d')
+#surf = ax.plot_surface(X, Y, avgavg, rstride=1, cstride=1, cmap=cm.coolwarm,
+        #linewidth=0, antialiased=False)
+######## /3D Plot ########
+

@@ -14,7 +14,7 @@ cimport numpy as np
 
 cdef class MHRun:
     cdef public:
-        object obj, db, hist, mapvalue, verbose, scheme_counter
+        object obj, db, hist, mapvalue, verbose, scheme_accept, scheme_propose
         int accept_loc, total_loc, iteration, burn, thin
         double mapenergy 
     def __init__(self, obj, burn=100000, thin=1, verbose=False):
@@ -26,7 +26,8 @@ cdef class MHRun:
         self.thin = thin
         self.db = None
 
-        self.scheme_counter = Counter()
+        self.scheme_accept = Counter()
+        self.scheme_propose = Counter()
 
     def clear(self):
         self.db = None
@@ -147,9 +148,10 @@ cdef class MHRun:
 
             r = oldenergy-newenergy
             
+            self.scheme_propose[scheme] += 1
             if np.random.rand() < exp(r):
                 accept=1
-                self.scheme_counter[scheme] += 1
+                self.scheme_accept[scheme] += 1
             else:
                 accept=0;
             if verbose and self.iteration % 10 == 0:
