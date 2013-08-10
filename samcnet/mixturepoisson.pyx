@@ -108,11 +108,12 @@ cdef class MPMDist:
         MPMParams curr, old
         np.ndarray data, S, priormu, priorsigma
         int D, kmax, n
-        double kappa, comp_geom, green_factor, logdetS, priorkappa, mumove, lammove
+        double kappa, comp_geom, green_factor, logdetS, priorkappa, mumove, lammove, wmove
 
     def __init__(self, data, kappa=None, S=None, comp_geom=None, 
             priormu=None, priorsigma=None, kmax=None, priorkappa=None,
-            mumove=None, lammove=None, d=None, startmu=None, startk=None):
+            mumove=None, lammove=None, d=None, startmu=None, startk=None,
+            wmove=None):
         self.green_factor = 0.0
 
         self.data = data
@@ -129,6 +130,7 @@ cdef class MPMDist:
         self.priorsigma = np.ones(self.D)*10.0 if priorsigma is None else priorsigma
         self.mumove = 0.04 if mumove is None else mumove
         self.lammove = 0.05 if lammove is None else lammove
+        self.wmove = 0.02 if wmove is None else wmove
 
         self.kmax = 1 if kmax is None else kmax
         ######## Starting point of MCMC Run #######
@@ -141,7 +143,8 @@ cdef class MPMDist:
 
         self.curr.mu = np.repeat(np.log(self.data.mean(axis=0)/self.curr.d.mean()).reshape(self.D,1),
                 self.kmax, axis=1) if startmu is None else startmu
-        assert startmu.shape == (self.D, self.kmax), "Wrong startmu dimensions"
+        assert self.curr.mu.shape[0] == self.D, "Wrong startmu dimensions"
+        assert self.curr.mu.shape[1] == self.kmax, "Wrong startmu dimensions"
         self.curr.sigma = self.S.copy() / self.kappa
         self.curr.logdetsigma = log(np.linalg.det(self.curr.sigma))
         self.curr.invsigma = np.linalg.inv(self.curr.sigma)
@@ -190,7 +193,7 @@ cdef class MPMDist:
             curr.mu += np.random.randn(self.D, self.kmax) * self.mumove
 
             if curr.k != 1:
-                curr.w[:curr.k] = curr.w[:curr.k] + np.random.randn(curr.k) * 0.1
+                curr.w[:curr.k] = curr.w[:curr.k] + np.random.randn(curr.k) * self.wmove
                 curr.w[:curr.k] = curr.w[:curr.k] / curr.w[:curr.k].sum()
 
             #modify di's
@@ -335,16 +338,19 @@ cdef class MPMDist:
         return self.calc_g(pts, parts, [self.curr.mu], [self.curr.sigma],
                 [self.curr.k], [self.curr.w], [self.curr.d], numlam)
 
+    #@cython.boundscheck(False)
+    #@cython.wraparound(False)
     def calc_g(self, pts_raw, parts, mus, sigmas, ks, ws, ds, numlam):
         """ Returns weighted (parts) average logp for all pts """
         cdef int i,m,d,s,j,numpts,numcom
         cdef double dmean, lam, loglam
         numpts = pts_raw.shape[0]
+        cdef double accumcom, accumlam, accumD
         cdef np.ndarray[np.double_t, ndim=2, mode="c"] pts = np.array(pts_raw, copy=True, order='c')
         cdef np.ndarray[np.double_t, ndim=1, mode="c"] res = np.zeros(numpts)
-        cdef np.ndarray[np.double_t, ndim=1, mode="c"] accumD = np.zeros(numpts)
-        cdef np.ndarray[np.double_t, ndim=1, mode="c"] accumcom = np.zeros(numpts)
-        cdef np.ndarray[np.double_t, ndim=1, mode="c"] accumlam = np.zeros(numpts)
+        #cdef np.ndarray[np.double_t, ndim=1, mode="c"] accumD = np.zeros(numpts)
+        #cdef np.ndarray[np.double_t, ndim=1, mode="c"] accumcom = np.zeros(numpts)
+        #cdef np.ndarray[np.double_t, ndim=1, mode="c"] accumlam = np.zeros(numpts)
         cdef np.ndarray[np.double_t, ndim=2, mode="c"] Z = spec.gammaln(pts+1)
         cdef np.ndarray[np.double_t, ndim=2, mode="c"] wsfast = np.vstack(ws)
         cdef np.ndarray[np.double_t, ndim=3, mode="c"] lams 
@@ -352,19 +358,19 @@ cdef class MPMDist:
             numcom = int(ks[i])
             dmean = ds[i].mean() # TODO, this should probably be input or something
             lams = np.dstack(( MVNormal(mus[i][:,m], sigmas[i]).rvs(numlam) for m in xrange(numcom) ))
-            accumlam[:] = 0
-            for s in xrange(numlam):
-                accumD[:] = 1
-                for d in xrange(self.D): 
-                    accumcom[:] = 0
-                    for m in xrange(numcom):
-                        lam = dmean*exp(lams[s,d,m])
-                        loglam = log(lam)
-                        for j in xrange(numpts):
-                            accumcom[j] += exp(pts[j,d]*loglam - lam - Z[j,d]) * wsfast[i,m]
-                    accumD *= accumcom
-                accumlam += accumD / numlam
-            res += parts[i] * accumlam
+            for j in xrange(numpts):
+                accumcom = 0.0
+                for m in xrange(numcom):
+                    accumlam = 0.0
+                    for s in xrange(numlam):
+                        accumD = 0.0
+                        for d in xrange(self.D): 
+                            lam = dmean*exp(lams[s,d,m])
+                            loglam = log(lam)
+                            accumD += pts[j,d]*loglam - lam - Z[j,d]
+                        accumlam += exp(accumD)
+                    accumcom += accumlam/numlam * wsfast[i,m]
+                res[j] += parts[i] * accumcom
         return np.log(res / parts.sum())
 
     def plot_traces(self, db, node, names=None):
