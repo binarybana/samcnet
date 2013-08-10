@@ -44,7 +44,7 @@ def gen_data(mu, cov, n):
 rho = -0.0
 cov = np.array([[1, rho],[rho, 1]]) * 0.01
 mu1 = np.array([log(2), log(2)])
-mu2 = np.array([log(4), log(4)])
+mu2 = np.array([log(2), log(8)])
 
 rseed = np.random.randint(1000)
 #rseed = 875
@@ -65,13 +65,14 @@ n,gext,grid = get_grid_data(ps, positive=True)
 ######## /Generate Data ########
 
 ######## MH Samples ########
-startmu = np.array([[log(4),log(4)],[log(2),log(2)]]).T
+startmu = np.array([[log(8),log(8)],[log(2),log(2)],[log(2),log(2)]]).T
+#startmu = np.array([[log(3),log(3)],[log(2),log(2)],[log(2),log(2)]]).T
 #startmu = np.array([[log(3),log(3)],[log(3),log(3)]]).T
 #startmu = np.array([[log(3),log(3)]]).T
 dist = MPMDist(ps,kappa=kappa,S=S,priormu=prior_mu,priorsigma=prior_sigma,
-	priorkappa=priorkappa,kmax=2,d=np.ones(60)*10, mumove=0.01, lammove=0.01,
-	startk=2,startmu=startmu)
-mh = mh.MHRun(dist, burn=10, thin=20)
+	priorkappa=priorkappa,kmax=3,d=np.ones(60)*10, mumove=0.1, lammove=0.01,
+	startk=2,startmu=startmu,wmove=0.03,birthmove=0.5)
+mh = mh.MHRun(dist, burn=0, thin=50)
 iters = 1e3
 t1=time()
 mh.sample(iters,verbose=False)
@@ -92,6 +93,7 @@ p.imshow(gavg, extent=gext, aspect=1, origin='lower')
 p.colorbar()
 p.plot(superps[:,0], superps[:,1], 'k.', alpha=0.1)
 
-dist.plot_traces(mh.db, mh.db.root.object, names=('sigma','mu','lam','k'))
+dist.plot_traces(mh.db, mh.db.root.object, names=('w','k','mu'))
+#dist.plot_traces(mh.db, mh.db.root.object, names=('sigma','mu','lam','k','w'))
 
 p.show()

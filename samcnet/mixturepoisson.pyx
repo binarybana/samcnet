@@ -72,8 +72,8 @@ cpdef double logp_normal(np.ndarray x, np.ndarray mu, np.ndarray sigma,
     cdef double t3 = -nu/2 * (np.dot(diff, invsigma) * diff).sum()
     return t1+t2+t3
 
-cpdef logp_uni_normal(x, mu, sigma): # Only up to a proportionality constant
-    return -(x-mu)*(x-mu)/(2*sigma) - 0.5*log(sigma)
+cpdef logp_uni_normal(x, mu, sigma): 
+    return -(x-mu)*(x-mu)/(2*sigma) - 0.5*log(sigma) - 0.5*log(2*pi)
 
 cdef class MPMParams:
     cdef public:
@@ -108,12 +108,12 @@ cdef class MPMDist:
         MPMParams curr, old
         np.ndarray data, S, priormu, priorsigma
         int D, kmax, n
-        double kappa, comp_geom, green_factor, logdetS, priorkappa, mumove, lammove, wmove
+        double kappa, comp_geom, green_factor, logdetS, priorkappa, mumove, lammove, wmove, birthmove
 
     def __init__(self, data, kappa=None, S=None, comp_geom=None, 
             priormu=None, priorsigma=None, kmax=None, priorkappa=None,
             mumove=None, lammove=None, d=None, startmu=None, startk=None,
-            wmove=None):
+            wmove=None,birthmove=None):
         self.green_factor = 0.0
 
         self.data = data
@@ -131,6 +131,7 @@ cdef class MPMDist:
         self.mumove = 0.04 if mumove is None else mumove
         self.lammove = 0.05 if lammove is None else lammove
         self.wmove = 0.02 if wmove is None else wmove
+        self.birthmove = 1.0 if birthmove is None else birthmove
 
         self.kmax = 1 if kmax is None else kmax
         ######## Starting point of MCMC Run #######
@@ -145,6 +146,7 @@ cdef class MPMDist:
                 self.kmax, axis=1) if startmu is None else startmu
         assert self.curr.mu.shape[0] == self.D, "Wrong startmu dimensions"
         assert self.curr.mu.shape[1] == self.kmax, "Wrong startmu dimensions"
+        self.curr.mu[:, self.curr.k:] = 0.0
         self.curr.sigma = self.S.copy() / self.kappa
         self.curr.logdetsigma = log(np.linalg.det(self.curr.sigma))
         self.curr.invsigma = np.linalg.inv(self.curr.sigma)
@@ -162,10 +164,13 @@ cdef class MPMDist:
         1) Remove mixture component (death)
         2) Modify parameters (w, mu, sigma, d, lam)
         """
-        cdef int i
+        cdef int i,j
+        cdef double corrfac
         self.old.set(self.curr)
         self.curr.energy = -inf
         cdef MPMParams curr = self.curr
+        self.green_factor = 0.0
+        cdef np.ndarray[np.double_t, ndim=1, mode="c"] addfac 
 
         if curr.k == 1 and curr.k == self.kmax:
             scheme = 2
@@ -177,24 +182,42 @@ cdef class MPMDist:
             scheme = np.random.choice(range(3), p=[1./8, 1./8, 6./8])
 
         if scheme == 0: # birth
-            curr.mu[:,curr.k] = curr.mu[:,curr.k-1]
+            curr.mu[:,curr.k] = curr.mu[:,curr.k-1] 
+            addfac = np.random.randn(self.D) * self.birthmove
+            for i in xrange(self.D):
+                self.green_factor -= logp_uni_normal(addfac[i], 0.0, self.birthmove**2)
+            curr.mu[:,curr.k] += addfac.T 
+            # TODO: Still not sure if ^^^ should also be on 
+            #the death side of things too
+
             curr.w *= 0.9
             curr.w[curr.k] = 0.1
+            self.green_factor += (curr.k)*log(0.9)
             curr.k += 1
-            #self.green_factor = FIXME
+            curr.mu[:, curr.k:] = 0.0
+            #print("Birth, propto k: %d, green_factor: %f" % (curr.k, self.green_factor))
 
         elif scheme == 1: # death
-            curr.w /= curr.w[:curr.k-1].sum()
+            corrfac = curr.w[:curr.k-1].sum()
+            curr.w /= corrfac
             curr.k -= 1
-            #self.green_factor = FIXME
+            curr.mu[:, curr.k-1] = 0.5*curr.mu[:, curr.k-1] + 0.5*curr.mu[:, curr.k]
+            curr.mu[:, curr.k:] = 0.0
+            self.green_factor = -curr.k*log(corrfac) # Negative is because we are wanting 1/corrfac
+            #print("Death, propto k: %d, green_factor: %f" % (curr.k, self.green_factor))
 
         elif scheme == 2:  # modify params
-            # Modify means
-            curr.mu += np.random.randn(self.D, self.kmax) * self.mumove
 
             if curr.k != 1:
+                i = np.random.randint(curr.k)
                 curr.w[:curr.k] = curr.w[:curr.k] + np.random.randn(curr.k) * self.wmove
+                np.clip(curr.w, 0.05, 1, out=curr.w)
                 curr.w[:curr.k] = curr.w[:curr.k] / curr.w[:curr.k].sum()
+            else:
+                i = 0
+
+            # Modify means
+            curr.mu[:,i] += np.random.randn(self.D) * self.mumove
 
             #modify di's
             #curr.d += np.random.randn(self.n)*0.2
@@ -202,12 +225,6 @@ cdef class MPMDist:
 
             # Modify covariances
             curr.sigma = sample_invwishart(curr.sigma * self.priorkappa, self.priorkappa)
-            #curr.sigma += np.random.randn(self.D,self.D)*0.1
-            #try:
-                #np.linalg.cholesky(curr.sigma)
-            #except np.linalg.LinAlgError:
-                #curr.sigma = sample_invwishart(self.S, self.kappa)
-
             curr.invsigma = np.linalg.inv(curr.sigma)
             curr.logdetsigma = log(np.linalg.det(curr.sigma))
         
@@ -251,7 +268,7 @@ cdef class MPMDist:
 
     def energy(self, force = False):
         if self.curr.energy != -inf and not force: # Cached 
-            return self.curr.energy - self.green_factor
+            return self.curr.energy #- self.green_factor #hmm... is this right?
 
         cdef double lam,dat,accumdat,accumK,sum = 0.0
         cdef int i,j,m,d
@@ -267,16 +284,12 @@ cdef class MPMDist:
 
         #Now add in the priors...
         # Lambdas
-        if curr.k == 0:
-            sum -= logp_normal(curr.lam, curr.mu[:,0], curr.sigma, 
-                    curr.logdetsigma, curr.invsigma)
-        else:
-            for j in xrange(self.n):
-                accumK = 0.0
-                for i in xrange(curr.k):
-                    accumK += exp(logp_normal(curr.lam[:,j], curr.mu[:,i], curr.sigma, 
-                            curr.logdetsigma, curr.invsigma)) * curr.w[i]
-                sum -= log(accumK)
+        for j in xrange(self.n):
+            accumK = 0.0
+            for i in xrange(curr.k):
+                accumK += exp(logp_normal(curr.lam[:,j], curr.mu[:,i], curr.sigma, 
+                        curr.logdetsigma, curr.invsigma)) * curr.w[i]
+            sum -= log(accumK)
 
         # Sigma
         sum -= logp_invwishart(curr.sigma, self.kappa, self.S, self.logdetS)
