@@ -154,7 +154,7 @@ cdef class MHRun:
                 self.scheme_accept[scheme] += 1
             else:
                 accept=0;
-            if verbose and self.iteration % 10 == 0:
+            if verbose:# and self.iteration % 10 == 0:
                 print("old: %8.2f, new: %8.2f, r: %5.2f, accept: %d" % (oldenergy, newenergy, r, accept))
 
             if accept == 0:
