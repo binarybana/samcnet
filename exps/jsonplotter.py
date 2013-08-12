@@ -3,6 +3,7 @@ import numpy as np
 import pylab as p
 import simplejson as js
 import pandas as pa
+import yaml
 
 from collections import defaultdict
 
@@ -12,27 +13,46 @@ db = rb.RedisDataStore('localhost')
 jobhash = db.select_jobfile()
 
 resdir = os.path.join('/home/bana/largeresearch/results', jobhash)
-resdir = os.path.join(resdir, os.listdir(resdir)[0])
-output = defaultdict(list)
-other = defaultdict(list)
+num_params = len(os.listdir(resdir))
+res_mat = np.zeros((num_params, 5))
+p_vec = np.zeros(num_params)
+for i,paramdir in enumerate(os.listdir(resdir)):
+    output = defaultdict(list)
+    other = defaultdict(list)
+    params = yaml.load(db.get_params(paramdir))
+    Ntrn = params['Ntrn']
+    for fname in os.listdir(os.path.join(resdir,paramdir)):
+        data = js.loads(open(os.path.join(resdir,paramdir,fname)).read())
+        for k,v in data.iteritems():
+            if k == 'errors':
+                for kk,vv in data['errors'].iteritems():
+                    output[kk].append(vv)
+            else: 
+                other[k].append(v)
 
-for fname in os.listdir(resdir):
-    data = js.loads(open(os.path.join(resdir,fname)).read())
-    for k,v in data.iteritems():
-        if k == 'errors':
-            for kk,vv in data['errors'].iteritems():
-                output[kk].append(vv)
-        else: 
-            other[k].append(v)
+    df = pa.DataFrame(output)
+    otherdf = pa.DataFrame(other)
 
-df = pa.DataFrame(output)
-otherdf = pa.DataFrame(other)
+    #print(otherdf.describe())
+    print(df.describe())
+    #p.figure()
+    #df.boxplot()
+    #p.ylabel('True error')
+    #p.title(jobhash[:6] + ' ' + db.get_description(jobhash) + ' ' + str(params))
 
-print(otherdf.describe())
-print(df.describe())
-p.figure()
-df.boxplot()
-p.ylabel('True error')
+    p_vec[i] = Ntrn
+    res_mat[i,:] = df.mean()
+
+ind = np.argsort(p_vec)
+p.plot(p_vec[ind], res_mat[ind,:], marker='o')
+p.legend(tuple(df.columns))
 p.title(jobhash[:6] + ' ' + db.get_description(jobhash))
+p.ylabel('True error')
+p.xlabel('Number of training samples per class')
+p.grid(True)
+lx,ux,ly,uy = p.axis()
+xl = ux - lx
+yl = uy - ly
+p.axis((lx-xl*0.1, ux+xl*0.1, ly-yl*0.1, uy+yl*0.1))
 
 p.show()
