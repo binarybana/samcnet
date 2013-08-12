@@ -37,7 +37,7 @@ def gen_data(mu, cov, n):
 	    ps[i,j] = di.poisson.rvs(10* np.exp(lams[i,j]))
     return ps
 
-D = 4
+D = 2
 mu0 = np.zeros(D) - 0.5
 mu1 = np.zeros(D) + 0.5
 #rho0 = -0.4
@@ -46,8 +46,8 @@ mu1 = np.zeros(D) + 0.5
 #cov1 = np.array([[1, rho1],[rho1, 1]])
 #cov0 = np.eye(D) 
 #cov1 = np.eye(D) 
-cov0 = sample_invwishart(np.eye(D)*10, 10)
-cov1 = sample_invwishart(np.eye(D)*10, 10)
+cov0 = sample_invwishart(np.eye(D)*3, 10)
+cov1 = sample_invwishart(np.eye(D)*3, 10)
 
 rseed = np.random.randint(10**6)
 #dseed = 1
@@ -79,6 +79,8 @@ norm_trn_data1 = norm_trn_data[Ntrn/2:,:]
 norm_tst_data = (tst_data - tst_data.mean(axis=0)) / np.sqrt(tst_data.var(axis=0,ddof=1))
 N = tst_data.shape[0]
 D = trn_data.shape[1]
+norm_tst_data0 = norm_tst_data[:N/2,:]
+norm_tst_data1 = norm_tst_data[N/2:,:]
 
 trn_labels = np.hstack(( np.zeros(Ntrn/2), np.ones(Ntrn/2) ))
 tst_labels = np.hstack(( np.zeros(N/2), np.ones(N/2) ))
@@ -107,17 +109,40 @@ output['gausserr'] = gc.approx_error_data(norm_tst_data, tst_labels)
 print("Gaussian Analytic error: %f" % output['gausserr'])
 
 # MPM Model
-dist0 = MPMDist(trn_data0,kmax=2)
-dist1 = MPMDist(trn_data1,kmax=2)
+dist0 = MPMDist(trn_data0,kmax=1,priorkappa=120,mumove=0.1,lammove=0.05)
+dist1 = MPMDist(trn_data1,kmax=1,priorkappa=120,mumove=0.1,lammove=0.05)
 mpm = MPMCls(dist0, dist1) 
 mh = mh.MHRun(mpm, burn=100, thin=20)
 t1=time()
-iters = 3e3
-numlam = 100
+iters = 2e3
+numlam = 50
 mh.sample(iters,verbose=False)
 output['mpmerr'] = mpm.approx_error_data(mh.db, tst_data, tst_labels,numlam=numlam)
 print("MPM Sampler error: %f" % output['mpmerr'])
 print "Whole run with %d iters and %d numlam took %f seconds" % (iters, numlam, time()-t1)
+
+p.figure()
+def myplot(ax,g,data0,data1,gext):
+    ax.plot(data0[:,0], data0[:,1], 'g.',label='0', alpha=0.3)
+    ax.plot(data1[:,0], data1[:,1], 'r.',label='1', alpha=0.3)
+    ax.legend(fontsize=8, loc='best')
+
+    im = ax.imshow(g, extent=gext, aspect='equal', origin='lower')
+    p.colorbar(im,ax=ax)
+    ax.contour(g, [0.0], extent=gext, aspect=1, origin='lower', cmap = p.cm.gray)
+def jit(x):
+    return x+np.random.randn(*x.shape)/4.0
+
+n,gext,grid = get_grid_data(np.vstack(( trn_data0, trn_data1 )), positive=True)
+gavg = mpm.calc_gavg(mh.db, grid, numlam=numlam).reshape(-1,n)
+myplot(p.subplot(2,1,1),gavg,jit(tst_data0),jit(tst_data1),gext)
+#myplot(p.subplot(2,1,1),gavg,trn_data0,trn_data1,gext)
+
+n,gext,grid = get_grid_data(np.vstack(( norm_trn_data0, norm_trn_data1 )), positive=False)
+myplot(p.subplot(2,1,2),sksvm.decision_function(grid).reshape(-1,n),jit(norm_tst_data0),jit(norm_tst_data1),gext)
+#myplot(p.subplot(2,1,2),sksvm.decision_function(grid).reshape(-1,n),norm_trn_data0,norm_trn_data1,gext)
+
+p.show()
 
 if 'WORKHASH' in os.environ:
     import zmq,time,zlib
