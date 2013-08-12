@@ -17,9 +17,11 @@ output = defaultdict(list)
 
 for fname in os.listdir(resdir):
     data = js.loads(open(os.path.join(resdir,fname)).read())
-    for k,v in data.iteritems():
+    for k,v in data['errors'].iteritems():
         output[k].append(v)
 
 df = pa.DataFrame(output)
 
 print(df.describe())
+df.boxplot()
+p.show()
