@@ -169,7 +169,7 @@ cdef class MHRun:
                 self.save_iter_db(oldenergy, 
                                 (current_iter-self.burn)//self.thin)
 
-            if self.iteration % 2000 == 0:
+            if self.iteration % 1000 == 0:
                 print("Iteration: %8d, best energy: %7g, current energy: %7g" % \
                         (self.iteration, self.mapenergy, newenergy))
 

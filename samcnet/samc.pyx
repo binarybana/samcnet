@@ -72,7 +72,7 @@ cdef class SAMCRun:
         print "Done. Setting limits to (%d, %d)" % (low,high)
 
         spread = high - low
-        self.scale = np.clip(spread/100.0, 0.25, 5)
+        self.scale = np.clip(spread/100.0, 0.5, 5)
         print "Setting scale to %f" % (self.scale)
 
         self.lowEnergy = <int>low

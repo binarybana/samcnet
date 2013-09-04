@@ -81,12 +81,12 @@ cdef class MPMParams:
         int k
         double energy, logdetsigma
     def __init__(self,D,kmax,numsamps):
-        self.mu = np.empty((D,kmax), np.double)
-        self.sigma = np.empty((D,D), np.double)
-        self.invsigma = np.empty((D,D), np.double)
-        self.w = np.empty(kmax, np.double)
-        self.lam = np.empty((D,numsamps), np.double)
-        self.d = np.empty(numsamps, np.double)
+        self.mu = np.zeros((D,kmax), np.double)
+        self.sigma = np.zeros((D,D), np.double)
+        self.invsigma = np.zeros((D,D), np.double)
+        self.w = np.zeros(kmax, np.double)
+        self.lam = np.zeros((D,numsamps), np.double)
+        self.d = np.zeros(numsamps, np.double)
         self.logdetsigma = 0.0
         self.energy = -inf
     cdef void set(MPMParams self, MPMParams other):
@@ -106,6 +106,7 @@ cdef class MPMParams:
 cdef class MPMDist:
     cdef public:
         MPMParams curr, old
+        object usepriors
         np.ndarray data, S, priormu, priorsigma
         int D, kmax, n
         double kappa, comp_geom, green_factor, logdetS, priorkappa, mumove, lammove, wmove, birthmove
@@ -113,7 +114,7 @@ cdef class MPMDist:
     def __init__(self, data, kappa=None, S=None, comp_geom=None, 
             priormu=None, priorsigma=None, kmax=None, priorkappa=None,
             mumove=None, lammove=None, d=None, startmu=None, startk=None,
-            wmove=None,birthmove=None):
+            wmove=None,birthmove=None,usepriors=True):
         self.green_factor = 0.0
 
         self.data = data
@@ -122,16 +123,18 @@ cdef class MPMDist:
 
         ##### Prior Quantities ######
         self.kappa = 5.0 if kappa is None else kappa
-        self.priorkappa = 20.0 if priorkappa is None else priorkappa
-        self.S = np.eye(self.D) * self.kappa if S is None else S
+        self.priorkappa = 10.0 if priorkappa is None else priorkappa
+        self.S = np.eye(self.D) * (self.kappa-1-self.D) if S is None else S
         self.logdetS = log(np.linalg.det(self.S))
         self.comp_geom = 0.6 if comp_geom is None else comp_geom
         self.priormu = np.zeros(self.D) if priormu is None else priormu
-        self.priorsigma = np.ones(self.D)*10.0 if priorsigma is None else priorsigma
+        self.priorsigma = np.ones(self.D)*5.0 if priorsigma is None else priorsigma
         self.mumove = 0.04 if mumove is None else mumove
         self.lammove = 0.05 if lammove is None else lammove
         self.wmove = 0.02 if wmove is None else wmove
         self.birthmove = 1.0 if birthmove is None else birthmove
+
+        self.usepriors=usepriors
 
         self.kmax = 1 if kmax is None else kmax
         ######## Starting point of MCMC Run #######
@@ -198,6 +201,7 @@ cdef class MPMDist:
             #print("Birth, propto k: %d, green_factor: %f" % (curr.k, self.green_factor))
 
         elif scheme == 1: # death
+            curr.w[curr.k-1] = 0.0
             corrfac = curr.w[:curr.k-1].sum()
             curr.w /= corrfac
             curr.k -= 1
@@ -211,7 +215,7 @@ cdef class MPMDist:
             if curr.k != 1:
                 i = np.random.randint(curr.k)
                 curr.w[:curr.k] = curr.w[:curr.k] + np.random.randn(curr.k) * self.wmove
-                np.clip(curr.w, 0.05, 1, out=curr.w)
+                np.clip(curr.w, 0.05, np.inf, out=curr.w)
                 curr.w[:curr.k] = curr.w[:curr.k] / curr.w[:curr.k].sum()
             else:
                 i = 0
@@ -224,7 +228,8 @@ cdef class MPMDist:
             #np.clip(curr.d, 8,12, out=curr.d)
 
             # Modify covariances
-            curr.sigma = sample_invwishart(curr.sigma * self.priorkappa, self.priorkappa)
+            curr.sigma = sample_invwishart(curr.sigma * (self.priorkappa-1-self.D),
+                    self.priorkappa) 
             curr.invsigma = np.linalg.inv(curr.sigma)
             curr.logdetsigma = log(np.linalg.det(curr.sigma))
         
@@ -286,21 +291,26 @@ cdef class MPMDist:
         # Lambdas
         for j in xrange(self.n):
             accumK = 0.0
-            for i in xrange(curr.k):
-                accumK += exp(logp_normal(curr.lam[:,j], curr.mu[:,i], curr.sigma, 
-                        curr.logdetsigma, curr.invsigma)) * curr.w[i]
-            sum -= log(accumK)
+            if curr.k == 1:
+                sum -= logp_normal(curr.lam[:,j], curr.mu[:,0], curr.sigma, 
+                        curr.logdetsigma, curr.invsigma)
+            else:
+                for i in xrange(curr.k):
+                    accumK += exp(logp_normal(curr.lam[:,j], curr.mu[:,i], curr.sigma, 
+                            curr.logdetsigma, curr.invsigma)) * curr.w[i]
+                sum -= log(accumK)
 
-        # Sigma
-        sum -= logp_invwishart(curr.sigma, self.kappa, self.S, self.logdetS)
+        if self.usepriors:
+            # Sigma
+            sum -= logp_invwishart(curr.sigma, self.kappa, self.S, self.logdetS)
 
-        # k
-        sum -= di.geom.logpmf(curr.k, self.comp_geom)
+            # k
+            sum -= di.geom.logpmf(curr.k, self.comp_geom)
 
-        # mu
-        for k in xrange(curr.k):
-            for i in xrange(self.D):
-                sum -= logp_uni_normal(curr.mu[i,k], self.priormu[i], self.priorsigma[i])
+            # mu
+            for k in xrange(curr.k):
+                for i in xrange(self.D):
+                    sum -= logp_uni_normal(curr.mu[i,k], self.priormu[i], self.priorsigma[i])
 
         self.curr.energy = sum
         return sum - self.green_factor
@@ -371,18 +381,19 @@ cdef class MPMDist:
             numcom = int(ks[i])
             dmean = ds[i].mean() # TODO, this should probably be input or something
             lams = np.dstack(( MVNormal(mus[i][:,m], sigmas[i]).rvs(numlam) for m in xrange(numcom) ))
+            numtotlam = lams.shape[0]
             for j in xrange(numpts):
                 accumcom = 0.0
                 for m in xrange(numcom):
                     accumlam = 0.0
-                    for s in xrange(numlam):
+                    for s in xrange(numtotlam): 
                         accumD = 0.0
                         for d in xrange(self.D): 
                             lam = dmean*exp(lams[s,d,m])
                             loglam = log(lam)
                             accumD += pts[j,d]*loglam - lam - Z[j,d]
                         accumlam += exp(accumD)
-                    accumcom += accumlam/numlam * wsfast[i,m]
+                    accumcom += accumlam/numtotlam * wsfast[i,m]
                 res[j] += parts[i] * accumcom
         return np.log(res / parts.sum())
 
