@@ -35,7 +35,8 @@ for i,paramdir in enumerate(os.listdir(resdir)):
                 for kk,vv in data['errors'].iteritems():
                     output[kk].append(vv)
                     if kk != 'mpm':
-                        diffs[kk].append((vv-mpmerr)/mpmerr)
+                        diffs[kk].append((vv-mpmerr))
+                        #diffs[kk].append((vv-mpmerr)/mpmerr)
             else: 
                 other[k].append(v)
 
@@ -59,7 +60,15 @@ for i,paramdir in enumerate(os.listdir(resdir)):
 
 ind = np.argsort(p_vec)
 p.figure()
-p.plot(p_vec[ind], med_mat[ind,:], marker='o')
+markers = list('xD*o>s^<+')
+key = {'gauss':'Normal OBC', 'svm':'SVM', 'knn':'3NN', 'lda':'LDA', 'mpm':'MP OBC',
+        'mpm_prior':'MP OBC Prior'}
+for i in range(med_mat.shape[1]):
+    if df.columns[i] in {'gauss','svm','mpm','mpm_prior'}:
+        #p.plot(p_vec[ind], med_mat[ind,i], marker=markers[i], markersize=10, label=key[df.columns[i]])
+        p.errorbar(p_vec[ind], med_mat[ind,i], yerr=std_mat[ind,i], marker='o',
+                label=key[df.columns[i]])
+
 #p.plot(p_vec[ind], med_diff_mat[ind,:], marker='o')
 
 #for i in xrange(comps):
@@ -68,11 +77,14 @@ p.plot(p_vec[ind], med_mat[ind,:], marker='o')
 #for i in xrange(comps-1):
     #p.errorbar(p_vec[ind], med_diff_mat[ind,i], yerr=std_diff_mat[ind,i], marker='o')
 
-p.legend(tuple(df.columns))
-p.title(jobhash[:6] + ' ' + db.get_description(jobhash))
+#p.legend(tuple(df.columns - pa.Index(['mpm'])))
+p.legend()
+#p.title(jobhash[:6] + ' ' + db.get_description(jobhash))
 p.ylabel('True error expectation')
+#p.ylabel('Difference in expected errors')
 #p.xlabel('Number of final features')
 p.xlabel('Training samples per class')
+#p.xlabel('mu1')
 p.grid(True)
 lx,ux,ly,uy = p.axis()
 xl = ux - lx
