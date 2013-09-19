@@ -568,8 +568,10 @@ def get_grid_data(samples, positive=False):
     ly -= yspread * 0.2
     hy += yspread * 0.2
     if positive:
-        lx = np.clip(lx, 0, np.inf)
-        ly = np.clip(ly, 0, np.inf)
+        #lx = np.clip(lx, 0, np.inf)
+        #ly = np.clip(ly, 0, np.inf)
+        lx = 0.0
+        ly = 0.0
     gextent = (lx,hx,ly,hy)
     grid = np.dstack(np.meshgrid(
                     np.linspace(lx,hx,n),
