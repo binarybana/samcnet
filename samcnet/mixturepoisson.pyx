@@ -106,7 +106,7 @@ cdef class MPMParams:
 cdef class MPMDist:
     cdef public:
         MPMParams curr, old
-        object usepriors
+        object usepriors, usedata
         np.ndarray data, S, priormu, priorsigma
         int D, kmax, n
         double kappa, comp_geom, green_factor, logdetS, priorkappa, mumove, lammove, wmove, birthmove
@@ -114,7 +114,7 @@ cdef class MPMDist:
     def __init__(self, data, kappa=None, S=None, comp_geom=None, 
             priormu=None, priorsigma=None, kmax=None, priorkappa=None,
             mumove=None, lammove=None, d=None, startmu=None, startk=None,
-            wmove=None,birthmove=None,usepriors=True):
+            wmove=None,birthmove=None,usepriors=True,usedata=True):
         self.green_factor = 0.0
 
         self.data = data
@@ -122,19 +122,20 @@ cdef class MPMDist:
         self.D = data.shape[1]
 
         ##### Prior Quantities ######
-        self.kappa = 5.0 if kappa is None else kappa
+        self.kappa = 10.0 if kappa is None else kappa
         self.priorkappa = 10.0 if priorkappa is None else priorkappa
-        self.S = np.eye(self.D) * (self.kappa-1-self.D) if S is None else S
+        self.S = np.eye(self.D) * (self.kappa-1-self.D) if S is None else S.copy()
         self.logdetS = log(np.linalg.det(self.S))
         self.comp_geom = 0.6 if comp_geom is None else comp_geom
-        self.priormu = np.zeros(self.D) if priormu is None else priormu
-        self.priorsigma = np.ones(self.D)*5.0 if priorsigma is None else priorsigma
+        self.priormu = np.zeros(self.D) if priormu is None else priormu.copy()
+        self.priorsigma = np.ones(self.D)*5.0 if priorsigma is None else priorsigma.copy()
         self.mumove = 0.04 if mumove is None else mumove
         self.lammove = 0.05 if lammove is None else lammove
         self.wmove = 0.02 if wmove is None else wmove
         self.birthmove = 1.0 if birthmove is None else birthmove
 
         self.usepriors=usepriors
+        self.usedata=usedata
 
         self.kmax = 1 if kmax is None else kmax
         ######## Starting point of MCMC Run #######
@@ -142,11 +143,11 @@ cdef class MPMDist:
         self.old = MPMParams(self.D, self.kmax, self.n)
 
         self.curr.k = 1 if startk is None else startk
-        self.curr.d = 10 * np.ones(self.n) if d is None else d
+        self.curr.d = 10 * np.ones(self.n) if d is None else d.copy()
         assert self.curr.d.size == self.n, "d must be vector of length n"
 
         self.curr.mu = np.repeat(np.log(self.data.mean(axis=0)/self.curr.d.mean()).reshape(self.D,1),
-                self.kmax, axis=1) if startmu is None else startmu
+                self.kmax, axis=1) if startmu is None else startmu.copy()
         assert self.curr.mu.shape[0] == self.D, "Wrong startmu dimensions"
         assert self.curr.mu.shape[1] == self.kmax, "Wrong startmu dimensions"
         self.curr.mu[:, self.curr.k:] = 0.0
@@ -280,25 +281,26 @@ cdef class MPMDist:
         curr = self.curr
         
         accumdat = 0.0
-        for j in xrange(self.n):
-            for d in xrange(self.D):
-                dat = self.data[j,d]
-                lam = curr.d[j]*exp(curr.lam[d,j])
-                accumdat += dat*log(lam) - lgamma(dat+1) - lam
-        sum -= accumdat
+        if self.usedata:
+            for j in xrange(self.n):
+                for d in xrange(self.D):
+                    dat = self.data[j,d]
+                    lam = curr.d[j]*exp(curr.lam[d,j])
+                    accumdat += dat*log(lam) - lgamma(dat+1) - lam
+            sum -= accumdat
 
-        #Now add in the priors...
-        # Lambdas
-        for j in xrange(self.n):
-            accumK = 0.0
-            if curr.k == 1:
-                sum -= logp_normal(curr.lam[:,j], curr.mu[:,0], curr.sigma, 
-                        curr.logdetsigma, curr.invsigma)
-            else:
-                for i in xrange(curr.k):
-                    accumK += exp(logp_normal(curr.lam[:,j], curr.mu[:,i], curr.sigma, 
-                            curr.logdetsigma, curr.invsigma)) * curr.w[i]
-                sum -= log(accumK)
+            #Now add in the priors...
+            # Lambdas
+            for j in xrange(self.n):
+                accumK = 0.0
+                if curr.k == 1:
+                    sum -= logp_normal(curr.lam[:,j], curr.mu[:,0], curr.sigma, 
+                            curr.logdetsigma, curr.invsigma)
+                else:
+                    for i in xrange(curr.k):
+                        accumK += exp(logp_normal(curr.lam[:,j], curr.mu[:,i], curr.sigma, 
+                                curr.logdetsigma, curr.invsigma)) * curr.w[i]
+                    sum -= log(accumK)
 
         if self.usepriors:
             # Sigma
