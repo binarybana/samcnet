@@ -143,7 +143,13 @@ cdef class MPMDist:
         self.old = MPMParams(self.D, self.kmax, self.n)
 
         self.curr.k = 1 if startk is None else startk
-        self.curr.d = 10 * np.ones(self.n) if d is None else d.copy()
+        if d is None:
+            self.curr.d = 10 * np.ones(self.n) 
+        elif type(d) is float:
+            self.curr.d = d * np.ones(self.n)
+        else:
+            self.curr.d = d.copy()
+
         assert self.curr.d.size == self.n, "d must be vector of length n"
 
         self.curr.mu = np.repeat(np.log(self.data.mean(axis=0)/self.curr.d.mean()).reshape(self.D,1),
