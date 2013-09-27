@@ -152,7 +152,9 @@ cdef class MPMDist:
 
         assert self.curr.d.size == self.n, "d must be vector of length n"
 
-        self.curr.mu = np.repeat(np.log(self.data.mean(axis=0)/self.curr.d.mean()).reshape(self.D,1),
+        nuc = np.clip(np.log(self.data.mean(axis=0)/self.curr.d.mean()), 
+                -5, 20).reshape(self.D,1)
+        self.curr.mu = np.repeat(nuc,
                 self.kmax, axis=1) if startmu is None else startmu.copy()
         assert self.curr.mu.shape[0] == self.D, "Wrong startmu dimensions"
         assert self.curr.mu.shape[1] == self.kmax, "Wrong startmu dimensions"
@@ -162,7 +164,7 @@ cdef class MPMDist:
         self.curr.invsigma = np.linalg.inv(self.curr.sigma)
         self.curr.w[:self.curr.k] = np.random.dirichlet((1,)*self.curr.k)
 
-        self.curr.lam = np.log(np.clip(data.T/self.curr.d, 0.1, np.inf))
+        self.curr.lam = np.clip(np.log(data.T/self.curr.d), -5, 20)
 
     def copy(self):
         return self.curr.copy()
