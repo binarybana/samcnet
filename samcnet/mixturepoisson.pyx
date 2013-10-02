@@ -379,7 +379,7 @@ cdef class MPMDist:
         cdef double dmean, lam, loglam
         numpts = pts_raw.shape[0]
         cdef double accumcom, accumlam, accumD
-        cdef np.ndarray[np.double_t, ndim=2, mode="c"] pts = np.array(pts_raw, copy=True, order='c')
+        cdef np.ndarray[np.double_t, ndim=2, mode="c"] pts = np.array(pts_raw, copy=True, order='c').astype(np.double)
         cdef np.ndarray[np.double_t, ndim=1, mode="c"] res = np.zeros(numpts)
         #cdef np.ndarray[np.double_t, ndim=1, mode="c"] accumD = np.zeros(numpts)
         #cdef np.ndarray[np.double_t, ndim=1, mode="c"] accumcom = np.zeros(numpts)
