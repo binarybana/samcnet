@@ -46,7 +46,7 @@ num_feat = setv(params, 'num_feat', 4, int)
 rseed = np.random.randint(10**8)
 #seed = 123
 seed = setv(params, 'seed', np.random.randint(10**8), int)
-Ntrn = setv(params, 'Ntrn', 40, int)
+Ntrn = setv(params, 'Ntrn', 8, int)
 
 np.random.seed(seed)
 
@@ -55,47 +55,51 @@ output['errors'] = {}
 errors = output['errors']
 np.seterr(all='ignore') # Careful with this
 
-def data_tcga(params):
-    store = pa.HDFStore(os.path.expanduser('~/largeresearch/seq-data/store.h5'))
-    luad = store['lusc_norm'].as_matrix()
-    lusc = store['luad_norm'].as_matrix()
+def jitter(x):
+    rand = np.random.randn
+    return x + rand(*x.shape)*0.0
 
-    alldata = np.hstack(( lusc, luad  )).T
-    alllabels = np.hstack(( np.ones(lusc.shape[1]), np.zeros(luad.shape[1]) ))
+p.close('all')
 
-    luad_inds = np.arange(luad.shape[1])
-    lusc_inds = np.arange(lusc.shape[1])
-    np.random.shuffle(luad_inds)
-    np.random.shuffle(lusc_inds)
-    trn_data = np.round(np.hstack(( 
-        lusc[:,lusc_inds[:Ntrn]], 
-        luad[:,luad_inds[:Ntrn]] )).T)
-    trn_labels = np.hstack(( np.zeros(Ntrn), np.ones(Ntrn) ))
+def data_karen(params):
+    datapath = os.path.expanduser('~/GSP/research/samc/samcnet/data/')
+    store = pa.HDFStore(datapath+'karen-clean1.h5')
+    data = store['data']
+    store.close()
 
-    tst_data = np.round(np.hstack(( 
-        lusc[:,lusc_inds[Ntrn:]], 
-        luad[:,luad_inds[Ntrn:]] )).T)
-    tst_labels = np.hstack(( np.zeros(lusc.shape[1] - Ntrn), 
-        np.ones(luad.shape[1] - Ntrn) ))
+    #num_cols = pa.Index(map(str.strip,open(datapath+'colon_rat.txt','r').readlines()))
+    num_cols = data.columns - pa.Index(['Diet', 'treatment'])
+    numdata = data[num_cols]
+
+    aom = data.treatment == 'AOM'
+    aom_inds = data.index[aom]
+    saline_inds = data.index - aom_inds
+
+    trn_inds = pa.Index(np.random.choice(aom_inds, Ntrn, replace=False)) + pa.Index(np.random.choice(saline_inds, Ntrn, replace=False))
+    trn_labels = np.array((data.loc[trn_inds, 'treatment']=='AOM').astype(np.int64) * 1)
+
+    tst_inds = data.index - trn_inds
+    tst_labels = np.array((data.loc[tst_inds, 'treatment']=='AOM').astype(np.int64) * 1)
 
     #grab only some columns
-    good_cols = (trn_data.mean(axis=0) < 10) & (trn_data.mean(axis=0) > 1)
-    low_trn_data = trn_data[:, good_cols]
-    low_tst_data = tst_data[:, good_cols]
-    selector = SelectKBest(f_classif, k=4)
-    selector.fit(low_trn_data, trn_labels)
-    pvind = selector.pvalues_.argsort()
+    #good_cols = numdata.columns[(numdata.mean() < 10) & (numdata.mean() > 1)]
+    #good_cols = numdata.columns[(numdata.mean() > 0)]
+    good_cols = numdata.columns
+    print("# Good columns: {}, # Total columns: {}".format(len(good_cols), numdata.shape[1]))
 
-    # Univariate T test
-    #pvals = np.array([st.ttest_ind(low_trn_data[trn_labels==0,i], low_trn_data[trn_labels==1,i])[1] 
-        #for i in range(low_trn_data.shape[1])], dtype=np.float)
-    #pvind1 = pvals.argsort()
-    #print (pvind1 - pvind).sum()
+    pvals = np.array([st.ttest_ind(numdata.loc[aom,col], numdata.loc[~aom,col])[1] for col in good_cols], dtype=np.float)
+    pvind = pvals.argsort()
 
-    feats = np.random.choice(np.arange(low_trn_data.shape[1]), num_feat, replace=False)
-    output['feature_start'] = list(feats)
-    store.close()
-    return low_trn_data[:,feats], trn_labels, low_tst_data[:,feats], tst_labels
+    candidates = pvind[:50]
+    feats = np.random.choice(candidates, num_feat, replace=False)
+
+    # F Tests
+    #selector = SelectKBest(f_classif, k=4)
+    #selector.fit(numdata.loc[:, good_cols].as_matrix(), aom)
+    #pvind2 = selector.pvalues_.argsort()
+    #print(selector.pvalues_[pvind2[:50]])
+
+    return numdata.ix[trn_inds, good_cols[feats]].as_matrix(), trn_labels, numdata.ix[tst_inds, good_cols[feats]].as_matrix(), tst_labels
 
 def data_test(params):
     trn_data = np.vstack(( np.zeros((10,2)), np.ones((10,2))+2 )) 
@@ -104,8 +108,9 @@ def data_test(params):
     tst_labels = np.hstack(( np.ones(1000), np.zeros(1000) ))
     return trn_data, trn_labels, tst_data, tst_labels
 
+t1 = time()
 
-trn_data, trn_labels, tst_data, tst_labels = data_tcga(params)
+trn_data, trn_labels, tst_data, tst_labels = data_karen(params)
 #trn_data, trn_labels, tst_data, tst_labels = data_test(params)
 def norm(data):
     return (data - data.mean(axis=0)) / np.sqrt(data.var(axis=0,ddof=1))
@@ -133,7 +138,6 @@ tst_data0, tst_data1 = split(tst_data, tst_labels)
 
 #p.show()
 #################### CLASSIFICATION ################
-t1 = time()
 sklda = LDA()
 skknn = KNN(3, warn_on_equidistant=False)
 sksvm = SVC()
@@ -146,23 +150,18 @@ errors['svm'] = (1-sksvm.score(norm_tst_data, tst_labels))
 print("skLDA error: %f" % errors['lda'])
 print("skKNN error: %f" % errors['knn'])
 print("skSVM error: %f" % errors['svm'])
-output['time_others'] = time()-t1
 
-# Gaussian Analytic
-t1 = time()
 kappa = 10
 bayes0 = GaussianBayes(np.zeros(num_feat), 1, kappa, np.eye(num_feat)*(kappa-1-num_feat), norm_trn_data0)
 bayes1 = GaussianBayes(np.zeros(num_feat), 1, kappa, np.eye(num_feat)*(kappa-1-num_feat), norm_trn_data1)
 
+# Gaussian Analytic
 gc = GaussianCls(bayes0, bayes1)
 errors['gauss'] = gc.approx_error_data(norm_tst_data, tst_labels)
 print("Gaussian Analytic error: %f" % errors['gauss'])
-output['time_gauss_obc'] = time()-t1
 
 # MPM Model
-t1 = time()
 up = True
-iters = 8e3
 pm0 = np.ones(num_feat) * 1
 pm1 = np.ones(num_feat) * 1
 dist0 = MPMDist(trn_data0,kmax=1,priorkappa=90,lammove=0.01,mumove=0.18,priormu=pm0,d=10.0,usepriors=up)
@@ -172,7 +171,6 @@ mhmc = mh.MHRun(mpm, burn=3000, thin=20)
 mhmc.sample(iters,verbose=False)
 errors['mpm'] = mpm.approx_error_data(mhmc.db, tst_data, tst_labels,numlam=40)
 print("MPM Sampler error: %f" % errors['mpm'])
-output['time_mp_obc'] = time()-t1
 mhmc.db.close()
 
 
@@ -185,10 +183,6 @@ def myplot(ax,g,data0,data1,gext):
     #p.colorbar(im,ax=ax)
     ax.contour(g, extent=gext, aspect=1.0, origin='lower')
     #ax.contour(g, [0.0], extent=gext, aspect=1.0, origin='lower', cmap = p.cm.gray)
-
-def jitter(x):
-    rand = np.random.randn
-    return x + rand(*x.shape)*0.1
 
 def plot_all(n, gext, grid, data0, data1, g0, g1, gavg):
     Z = np.exp(g0)+np.exp(g1)
@@ -291,6 +285,17 @@ def plot_concise(n, gext, grid, data0, data1, g0, g1, gavg):
 #myplot(p.gca(),gc.calc_gavg(grid).reshape(-1,n),norm_trn_data0,norm_trn_data1,gext)
 #p.show()
 
+#Plot data
+#
+#p.figure()
+#n,gext,grid = get_grid_data(np.vstack(( trn_data0, trn_data1 )), positive=True)
+#p.plot(jitter(trn_data0[:,0]), jitter(trn_data0[:,1]), 'go')
+#p.plot(jitter(trn_data1[:,0]), jitter(trn_data1[:,1]), 'ro')
+#p.figure()
+#p.plot(jitter(tst_data0[:,0]), jitter(tst_data0[:,1]), 'go')
+#p.plot(jitter(tst_data1[:,0]), jitter(tst_data1[:,1]), 'ro')
+#p.show()
+
 #p.figure()
 #myplot(p.subplot(1,1,1),gavg,jitter(tst_data0),jitter(tst_data1),gext)
 #p.axis(gext)
@@ -302,6 +307,7 @@ def plot_concise(n, gext, grid, data0, data1, g0, g1, gavg):
 #output['acceptance'] = float(mhmc.accept_loc)/mhmc.total_loc
 
 output['seed'] = seed
+#output['time'] = time()-t1
 
 if 'WORKHASH' in os.environ:
     import zmq
