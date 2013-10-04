@@ -69,6 +69,11 @@ cdef class MHRun:
     def close_db(self):
         self.db.close()
 
+    def clean_db(self):
+        fname = self.db.filename
+        self.close_db()
+        os.remove(fname)
+
     def save_iter_db(self, double energy, int iteration):
         self.db.root.mh.energy_trace.append((energy,))
         self.obj.save_iter_db(self.db, self.db.root.object)

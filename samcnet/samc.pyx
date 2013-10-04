@@ -131,6 +131,11 @@ cdef class SAMCRun:
     def close_db(self):
         self.db.close()
 
+    def clean_db(self):
+        fname = self.db.filename
+        self.close_db()
+        os.remove(fname)
+
     def save_iter_db(self, double theta, double energy, int iteration):
         self.db.root.samc.theta_trace.append((theta,))
         self.db.root.samc.energy_trace.append((energy,))
