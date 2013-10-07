@@ -153,6 +153,7 @@ def data_tcga(params):
     store = pa.HDFStore(os.path.expanduser('~/largeresearch/seq-data/store.h5'))
     luad = store['lusc_norm'].as_matrix()
     lusc = store['luad_norm'].as_matrix()
+    print luad.shape
 
     alldata = np.hstack(( lusc, luad  )).T
     alllabels = np.hstack(( np.ones(lusc.shape[1]), np.zeros(luad.shape[1]) ))
@@ -214,24 +215,27 @@ def data_karen(params):
     tst_labels = np.array((data.loc[tst_inds, 'treatment']=='AOM').astype(np.int64) * 1)
 
     #grab only some columns
-    #good_cols = numdata.columns[(numdata.mean() < 10) & (numdata.mean() > 1)]
-    #good_cols = numdata.columns[(numdata.mean() > 0)]
-    good_cols = numdata.columns
+    low = params['low_filter']
+    high = params['high_filter']
+    good_cols = numdata.columns[(numdata.mean() <= high) & (numdata.mean() >= low)]
+
     print("# Good columns: {}, # Total columns: {}".format(
         len(good_cols), numdata.shape[1]))
 
-    pvals = np.array([st.ttest_ind(numdata.loc[aom,col], 
-        numdata.loc[~aom,col])[1] for col in good_cols], dtype=np.float)
-    pvind = pvals.argsort()
-
-    candidates = pvind[:50]
-    feats = np.random.choice(candidates, num_feat, replace=False)
+    # T Tests (same ranking as F tests)
+    #pvals = np.array([st.ttest_ind(numdata.loc[aom,col], 
+        #numdata.loc[~aom,col])[1] for col in good_cols], dtype=np.float)
+    #pvind = pvals.argsort()
 
     # F Tests
-    #selector = SelectKBest(f_classif, k=4)
-    #selector.fit(numdata.loc[:, good_cols].as_matrix(), aom)
-    #pvind2 = selector.pvalues_.argsort()
+    selector = SelectKBest(f_classif, k=4)
+    selector.fit(numdata.loc[:, good_cols].as_matrix().astype(np.float), aom)
+    pvind = selector.pvalues_.argsort()
     #print(selector.pvalues_[pvind2[:50]])
+
+    num_candidates = params['num_candidates']
+    candidates = pvind[:num_candidates]
+    feats = np.random.choice(candidates, num_feat, replace=False)
 
     return numdata.ix[trn_inds, good_cols[feats]].as_matrix(), trn_labels, \
             numdata.ix[tst_inds, good_cols[feats]].as_matrix(), tst_labels

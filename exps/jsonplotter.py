@@ -66,6 +66,8 @@ for i in range(len(df.columns)):
 p.legend()
 p.ylabel('Mean holdout error')
 p.xlabel('Training samples per class')
+#p.xlabel(r'$\mu_1$')
+#p.xlabel('Gene expression \"strength\"')
 p.grid(True)
 adjust_plot()
 
@@ -77,7 +79,7 @@ for i in range(len(df.columns)):
     diffdf = pa.concat(diffs, keys=dependent_var[ind], axis=1)
     p.errorbar(dependent_var[ind]+offset, diffdf.mean(), yerr=diffdf.std(), marker='o',
             label=key[df.columns[i]])
-    offset += 0.1
+    offset += 0.01
 p.legend()
 p.ylabel('Holdout error - Holdout error for MP OBC')
 p.xlabel('Training samples per class')
