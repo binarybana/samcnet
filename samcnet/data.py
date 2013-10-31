@@ -15,14 +15,6 @@ from statsmodels.sandbox.distributions.mv_normal import MVT,MVNormal
 
 from lori import sample_invwishart
 
-def norm(data1, data2):
-    mu = data1.mean(axis=0)
-    std = np.sqrt(data1.var(axis=0, ddof=1))
-    return (data1 - mu) / std, (data2 - mu) / std
-
-def split(data, labels):
-    return data[labels==0,:], data[labels==1,:]
-
 param_template = """.d NoOfTrainSamples0 {Ntrn}
 .d NoOfTrainSamples1 {Ntrn}
 .d NoOfTestSamples0 {Ntst}
@@ -53,6 +45,7 @@ def setv(p,s,d,conv=None):
 
 def data_yj(params):
     Ntrn = params['Ntrn']
+    Ntst = params['Ntst']
     num_feat = params['num_feat']
     lowd = params['lowd']
     highd = params['highd']
@@ -79,19 +72,24 @@ def data_yj(params):
     finally:
         os.chdir(currdir)
 
-    rawdata = np.loadtxt(path.join(synloc, 'out','%s_trn.txt'%fname),
+    raw_trn_data = np.loadtxt(path.join(synloc, 'out','%s_trn.txt'%fname),
         delimiter=',', skiprows=1)
-    trn_labels = np.hstack(( np.zeros(Ntrn), np.ones(Ntrn) ))
     selector = SelectKBest(f_classif, k=num_feat)
-    selector.fit(rawdata, trn_labels)
-    trn_data = selector.transform(rawdata)
-    D = trn_data.shape[1]
+    trn_labels = np.hstack(( np.zeros(Ntrn), np.ones(Ntrn) ))
+    selector.fit(raw_trn_data, trn_labels)
+
     raw_tst_data = np.loadtxt(path.join(synloc, 'out','%s_tst.txt'%fname),
             delimiter=',', skiprows=1)
-    tst_data = selector.transform(raw_tst_data)
-    N = tst_data.shape[0]
-    tst_labels = np.hstack(( np.zeros(N/2), np.ones(N/2) ))
-    return trn_data, trn_labels, tst_data, tst_labels
+
+    trn0, trn1, tst0, tst1 = gen_labels(Ntrn, Ntrn, Ntst, Ntst)
+    rawdata = np.vstack(( raw_trn_data, raw_tst_data ))
+
+    pvind = selector.pvalues_.argsort()
+    feats = np.zeros(rawdata.shape[1], dtype=bool)
+    feats[pvind[:num_feat]] = True
+    calib = ~feats
+
+    return rawdata, trn0, trn1, tst0, tst1, feats, calib 
 
 def gen_data(mu, cov, n, lowd, highd):
     lams = MVNormal(mu, cov).rvs(n)
@@ -102,7 +100,8 @@ def gen_data(mu, cov, n, lowd, highd):
     return ps
 
 def data_jk(params):
-    D = params['num_feat']
+    D = params['num_gen_feat']
+    num_feat = params['num_feat']
     Ntrn = params['Ntrn']
     Ntst = params['Ntst']
     sigma0 = params['sigma0']
@@ -140,24 +139,31 @@ def data_jk(params):
     tst_data0 = gen_data(lmu0,cov0,Ntst,lowd,highd)
     tst_data1 = gen_data(lmu1,cov1,Ntst,lowd,highd)
 
+    rawdata = np.vstack(( trn_data0, trn_data1, tst_data0, tst_data1 ))
+
+    trn0, trn1, tst0, tst1 = gen_labels(Ntrn, Ntrn, Ntst, Ntst)
+
+    selector = SelectKBest(f_classif, k=num_feat)
     trn_data = np.vstack(( trn_data0, trn_data1 ))
-    tst_data = np.vstack(( tst_data0, tst_data1 ))
     trn_labels = np.hstack(( np.zeros(Ntrn), np.ones(Ntrn) ))
-    tst_labels = np.hstack(( np.zeros(Ntst), np.ones(Ntst) ))
-    np.random.seed(rseed)
-    return trn_data, trn_labels, tst_data, tst_labels
+    selector.fit(trn_data, trn_labels)
+    pvind = selector.pvalues_.argsort()
+
+    feats = np.zeros(rawdata.shape[1], dtype=bool)
+    feats[pvind[:num_feat]] = True
+    #feats[:num_feat] = True
+    calib = ~feats
+    return rawdata, trn0, trn1, tst0, tst1, feats, calib
 
 def data_tcga(params):
     Ntrn = params['Ntrn']
     num_feat = params['num_feat']
+
     store = pa.HDFStore(os.path.expanduser('~/largeresearch/seq-data/store.h5'))
     luad = store['lusc_norm'].as_matrix()
     lusc = store['luad_norm'].as_matrix()
-    print luad.shape
 
-    alldata = np.hstack(( lusc, luad  )).T
-    alllabels = np.hstack(( np.ones(lusc.shape[1]), np.zeros(luad.shape[1]) ))
-
+    # Grab random training set and use the rest as testing
     luad_inds = np.arange(luad.shape[1])
     lusc_inds = np.arange(lusc.shape[1])
     np.random.shuffle(luad_inds)
@@ -165,15 +171,16 @@ def data_tcga(params):
     trn_data = np.round(np.hstack(( 
         lusc[:,lusc_inds[:Ntrn]], 
         luad[:,luad_inds[:Ntrn]] )).T)
-    trn_labels = np.hstack(( np.zeros(Ntrn), np.ones(Ntrn) ))
-
     tst_data = np.round(np.hstack(( 
         lusc[:,lusc_inds[Ntrn:]], 
         luad[:,luad_inds[Ntrn:]] )).T)
-    tst_labels = np.hstack(( np.zeros(lusc.shape[1] - Ntrn), 
-        np.ones(luad.shape[1] - Ntrn) ))
 
-    #grab only some columns
+    # Generate labels
+    trn_labels = np.hstack(( np.zeros(Ntrn), np.ones(Ntrn) ))
+    trn0, trn1, tst0, tst1 = gen_labels(Ntrn, Ntrn, lusc.shape[1]-Ntrn, luad.shape[1]-Ntrn)
+
+    # Select a subset of the features, then select a further subset based on
+    # Univariate F tests
     good_cols = (trn_data.mean(axis=0) < 10) & (trn_data.mean(axis=0) > 1)
     low_trn_data = trn_data[:, good_cols]
     low_tst_data = tst_data[:, good_cols]
@@ -181,19 +188,24 @@ def data_tcga(params):
     selector.fit(low_trn_data, trn_labels)
     pvind = selector.pvalues_.argsort()
 
-    # Univariate T test
-    #pvals = np.array([st.ttest_ind(low_trn_data[trn_labels==0,i], low_trn_data[trn_labels==1,i])[1] 
-        #for i in range(low_trn_data.shape[1])], dtype=np.float)
-    #pvind1 = pvals.argsort()
-    #print (pvind1 - pvind).sum()
+    rawdata = np.vstack(( low_trn_data, low_tst_data ))
 
-    feats = np.random.choice(np.arange(low_trn_data.shape[1]), num_feat, replace=False)
+    feats_ind = np.random.choice(np.arange(low_trn_data.shape[1]), num_feat, replace=False)
+    feats = np.zeros(rawdata.shape[1], dtype=bool)
+    feats[feats_ind] = True
+    #feats[:num_feat] = True
+    calib = ~feats
+
     store.close()
-    return low_trn_data[:,feats], trn_labels, low_tst_data[:,feats], tst_labels
+    return rawdata, trn0, trn1, tst0, tst1, feats, calib
 
 def data_karen(params):
     Ntrn = params['Ntrn']
     num_feat = params['num_feat']
+    low = params['low_filter']
+    high = params['high_filter']
+    num_candidates = params['num_candidates']
+
     datapath = os.path.expanduser('~/GSP/research/samc/samcnet/data/')
     store = pa.HDFStore(datapath+'karen-clean1.h5')
     data = store['data']
@@ -203,29 +215,22 @@ def data_karen(params):
     num_cols = data.columns - pa.Index(['Diet', 'treatment'])
     numdata = data[num_cols]
 
-    aom = data.treatment == 'AOM'
+    cat = 'treatment'
+    cls0 = 'AOM'
+
+    aom = data[cat] == cls0
     aom_inds = data.index[aom]
     saline_inds = data.index - aom_inds
-
     trn_inds = pa.Index(np.random.choice(aom_inds, Ntrn, replace=False)) \
             + pa.Index(np.random.choice(saline_inds, Ntrn, replace=False))
+    tst_inds = data.index - trn_inds
     trn_labels = np.array((data.loc[trn_inds, 'treatment']=='AOM').astype(np.int64) * 1)
 
-    tst_inds = data.index - trn_inds
-    tst_labels = np.array((data.loc[tst_inds, 'treatment']=='AOM').astype(np.int64) * 1)
-
-    #grab only some columns
-    low = params['low_filter']
-    high = params['high_filter']
+    # Feature selection, first stage
     good_cols = numdata.columns[(numdata.mean() <= high) & (numdata.mean() >= low)]
 
     print("# Good columns: {}, # Total columns: {}".format(
         len(good_cols), numdata.shape[1]))
-
-    # T Tests (same ranking as F tests)
-    #pvals = np.array([st.ttest_ind(numdata.loc[aom,col], 
-        #numdata.loc[~aom,col])[1] for col in good_cols], dtype=np.float)
-    #pvind = pvals.argsort()
 
     # F Tests
     selector = SelectKBest(f_classif, k=4)
@@ -233,12 +238,22 @@ def data_karen(params):
     pvind = selector.pvalues_.argsort()
     #print(selector.pvalues_[pvind2[:50]])
 
-    num_candidates = params['num_candidates']
-    candidates = pvind[:num_candidates]
-    feats = np.random.choice(candidates, num_feat, replace=False)
+    rawdata = numdata[good_cols].as_matrix()
 
-    return numdata.ix[trn_inds, good_cols[feats]].as_matrix(), trn_labels, \
-            numdata.ix[tst_inds, good_cols[feats]].as_matrix(), tst_labels
+    candidates = pvind[:num_candidates]
+    feats_ind = np.random.choice(candidates, num_feat, replace=False)
+    feats = np.zeros(rawdata.shape[1], dtype=bool)
+    feats[feats_ind] = True
+    calib = ~feats
+
+    trn0 = np.array(data.loc[trn_inds, cat] == cls0, dtype=bool)
+    trn1 = np.array(data.loc[trn_inds, cat] != cls0, dtype=bool)
+    tst0 = np.array(data.loc[tst_inds, cat] == cls0, dtype=bool)
+    tst1 = np.array(data.loc[tst_inds, cat] != cls0, dtype=bool)
+    
+    return rawdata, trn0, trn1, tst0, tst1, feats, calib
+    #return numdata.ix[trn_inds, good_cols[feats]].as_matrix(), trn_labels, \
+            #numdata.ix[tst_inds, good_cols[feats]].as_matrix(), tst_labels
 
 def data_test(params):
     trn_data = np.vstack(( np.zeros((10,2)), np.ones((10,2))+2 )) 
@@ -246,6 +261,47 @@ def data_test(params):
     tst_data = np.vstack(( np.zeros((1000,2)), np.ones((1000,2)) ))
     tst_labels = np.hstack(( np.ones(1000), np.zeros(1000) ))
     return trn_data, trn_labels, tst_data, tst_labels
+
+def gen_labels(a,b,c,d):
+    trn0 = np.hstack(( np.ones(a), np.zeros(b), np.zeros(c+d) )).astype(bool)
+    trn1 = np.hstack(( np.zeros(a), np.ones(b), np.zeros(c+d) )).astype(bool)
+    tst0 = np.hstack(( np.zeros(a+b), np.ones(c), np.zeros(d) )).astype(bool)
+    tst1 = np.hstack(( np.zeros(a+b), np.zeros(c), np.ones(d) )).astype(bool)
+    return trn0, trn1, tst0, tst1
+
+#def norm(data1, data2):
+    #mu = data1.mean(axis=0)
+    #std = np.sqrt(data1.var(axis=0, ddof=1))
+    #return (data1 - mu) / std, (data2 - mu) / std
+
+#def split(data, labels):
+    #return data[labels==0,:], data[labels==1,:]
+
+#def shuffle_features(trn, tst):
+    #D = trn.shape[1]
+    #assert D == tst.shape[1]
+    #ind = np.arange(D)
+    #np.random.shuffle(ind)
+    #return trn[:,ind], tst[:,ind]
+
+def get_data(method, params):
+    """
+    Returns a selector dictionary, rawdata matrix and normalized data matrix
+    where the selector dictionary has the following keys defined:
+    trn, trn0, trn1, tst, tst0, tst1, feats, calib
+    where the last two are for the features and calibration features
+    """
+    rawdata, trn0, trn1, tst0, tst1, feats, calib = method(params)
+    trn = trn0 | trn1
+    tst = tst0 | tst1
+
+    sel = dict(trn0=trn0, trn1=trn1, trn=trn, tst0=tst0, tst1=tst1, tst=tst, feats=feats, calib=calib)
+    # Normalize
+    mu = rawdata[trn,:].mean(axis=0)
+    std = np.sqrt(rawdata[trn,:].var(axis=0, ddof=1))
+    normdata = (rawdata - mu) / std
+    
+    return sel, rawdata, normdata
 
 if __name__ == '__main__':
     params = {}
@@ -260,7 +316,8 @@ if __name__ == '__main__':
             p[s]
 
     iters = setv(params, 'iters', int(1e4), int)
-    num_feat = setv(params, 'num_feat', 4, int)
+    num_feat = setv(params, 'num_feat', 2, int)
+    num_feat = setv(params, 'num_gen_feat', 4, int)
     seed = setv(params, 'seed', np.random.randint(10**8), int)
     rseed = setv(params, 'rseed', np.random.randint(10**8), int)
     Ntrn = setv(params, 'Ntrn', 20, int)
@@ -280,10 +337,20 @@ if __name__ == '__main__':
     lowd = setv(params, 'lowd', 9.0, float)
     highd = setv(params, 'highd', 11.0, float)
     numlam = setv(params, 'numlam', 20, int)
+    low = setv(params, 'low_filter', 3, int)
+    high = setv(params, 'high_filter', 30, int)
+    num_candidates = setv(params, 'num_candidates', 50, int)
 
-    data_yj(params)
-    data_jk(params)
-    data_tcga(params)
-    data_karen(params)
-    data_test(params)
+    def test(out):
+        sel, raw, norm = out
+        assert raw.shape == norm.shape
+        for k,v in sel.iteritems():
+            assert v.sum() > 0, str(k) + str(v.shape)
+            assert v.sum() < max(raw.shape)
+            assert v.shape[0] == raw.shape[0] or v.shape[0] == raw.shape[1]
+
+    test(get_data(data_yj, params))
+    test(get_data(data_jk, params))
+    get_data(data_tcga, params)
+    get_data(data_karen, params)
 
