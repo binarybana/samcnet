@@ -20,6 +20,7 @@ try:
     from samcnet.mixturepoisson import *
     from samcnet.lori import *
     from samcnet.data import *
+    from samcnet.calibrate import *
 except ImportError as e:
     sys.exit("Make sure LD_LIBRARY_PATH is set correctly and that the build"+\
             " directory is populated by waf.\n\n %s" % str(e))
@@ -47,10 +48,18 @@ mu0 = setv(params, 'mu0', 0.0, float)
 mu1 = setv(params, 'mu1', 0.6, float)
 sigma0 = setv(params, 'sigma0', 0.2, float)
 sigma1 = setv(params, 'sigma1', 0.6, float)
-kappa = setv(params, 'kappa', 10.0, float)
+kappa = setv(params, 'kappa', 30.0, float)
 
 lowd = setv(params, 'lowd', 9.0, float)
 highd = setv(params, 'highd', 11.0, float)
+
+num_gen_feat = setv(params, 'num_gen_feat', 20, int)
+mumove = setv(params, 'mumove', 0.08, float)
+lammove = setv(params, 'lammove', 0.01, float)
+priorkappa = setv(params, 'priorkappa', 150, int)
+burn = setv(params, 'burn', 3000, int)
+thin = setv(params, 'thin', 40, int)
+numlam = setv(params, 'numlam', 40, int)
 
 output = {}
 output['errors'] = {}
@@ -58,65 +67,96 @@ errors = output['errors']
 np.seterr(all='ignore') # Careful with this
 rseed = np.random.randint(10**8)
 
+sel, rawdata, normdata = get_data(data_jk, params)
+norm_trn_data = normdata.loc[sel['trn'], sel['feats']]
+norm_tst_data = normdata.loc[sel['tst'], sel['feats']]
+tst_data = rawdata.loc[sel['tst'], sel['feats']]
+
 t1 = time()
-
-trn_data, trn_labels, tst_data, tst_labels = data_jk(params)
-norm_trn_data, norm_tst_data = norm(trn_data, tst_data)
-
-norm_trn_data0, norm_trn_data1 = split(norm_trn_data, trn_labels)
-norm_tst_data0, norm_tst_data1 = split(norm_tst_data, tst_labels)
-trn_data0, trn_data1 = split(trn_data, trn_labels)
-tst_data0, tst_data1 = split(tst_data, tst_labels)
-
 #################### CLASSIFICATION ################
 sklda = LDA()
 skknn = KNN(3, warn_on_equidistant=False)
 sksvm = SVC()
-sklda.fit(norm_trn_data, trn_labels)
-skknn.fit(norm_trn_data, trn_labels)
-sksvm.fit(norm_trn_data, trn_labels)
-errors['lda'] = (1-sklda.score(norm_tst_data, tst_labels))
-errors['knn'] = (1-skknn.score(norm_tst_data, tst_labels))
-errors['svm'] = (1-sksvm.score(norm_tst_data, tst_labels))
+sklda.fit(norm_trn_data, sel['trnl'])
+skknn.fit(norm_trn_data, sel['trnl'])
+sksvm.fit(norm_trn_data, sel['trnl'])
+errors['lda'] = (1-sklda.score(norm_tst_data, sel['tstl']))
+errors['knn'] = (1-skknn.score(norm_tst_data, sel['tstl']))
+errors['svm'] = (1-sksvm.score(norm_tst_data, sel['tstl']))
 print("skLDA error: %f" % errors['lda'])
 print("skKNN error: %f" % errors['knn'])
 print("skSVM error: %f" % errors['svm'])
 
-kappa = 10
-bayes0 = GaussianBayes(np.zeros(num_feat), 1, kappa, np.eye(num_feat)*(kappa-1-num_feat), norm_trn_data0)
-bayes1 = GaussianBayes(np.zeros(num_feat), 1, kappa, np.eye(num_feat)*(kappa-1-num_feat), norm_trn_data1)
+bayes0 = GaussianBayes(np.zeros(num_feat), 1, kappa, 
+        np.eye(num_feat)*(kappa-1-num_feat), 
+        normdata.loc[sel['trn0'], sel['feats']])
+bayes1 = GaussianBayes(np.zeros(num_feat), 1, kappa,
+        np.eye(num_feat)*(kappa-1-num_feat), 
+        normdata.loc[sel['trn1'], sel['feats']])
 
 # Gaussian Analytic
 gc = GaussianCls(bayes0, bayes1)
-errors['gauss'] = gc.approx_error_data(norm_tst_data, tst_labels)
+errors['gauss'] = gc.approx_error_data(norm_tst_data, sel['tstl'])
 print("Gaussian Analytic error: %f" % errors['gauss'])
 
 # MPM Model
-dist0 = MPMDist(trn_data0,kmax=1,priorkappa=150,lammove=0.01,mumove=0.08)
-dist1 = MPMDist(trn_data1,kmax=1,priorkappa=150,lammove=0.01,mumove=0.08)
+dist0 = MPMDist(rawdata.loc[sel['trn0'],sel['feats']],priorkappa=priorkappa,
+        lammove=lammove,mumove=mumove)
+dist1 = MPMDist(rawdata.loc[sel['trn1'],sel['feats']],priorkappa=priorkappa,
+        lammove=lammove,mumove=mumove)
 mpm = MPMCls(dist0, dist1) 
-mhmc = mh.MHRun(mpm, burn=1000, thin=50)
+mhmc = mh.MHRun(mpm, burn=burn, thin=thin)
 mhmc.sample(iters,verbose=False)
-errors['mpm'] = mpm.approx_error_data(mhmc.db, tst_data, tst_labels,numlam=50)
+errors['mpm'] = mpm.approx_error_data(mhmc.db, tst_data, sel['tstl'],numlam=numlam)
 print("MPM Sampler error: %f" % errors['mpm'])
 
 output['acceptance'] = float(mhmc.accept_loc)/mhmc.total_loc
 mhmc.clean_db()
+########################################
+########################################
+########################################
+########################################
+########################################
+# Calibrated MPM Model
+p0, p1 = calibrate(rawdata, sel, params)
 
+dist0 = MPMDist(rawdata.loc[sel['trn0'],sel['feats']],priorkappa=priorkappa,
+        lammove=lammove,mumove=mumove,**p0)
+dist1 = MPMDist(rawdata.loc[sel['trn1'],sel['feats']],priorkappa=priorkappa,
+        lammove=lammove,mumove=mumove,**p1)
+mpmc = MPMCls(dist0, dist1) 
+mhmcc = mh.MHRun(mpmc, burn=burn, thin=thin)
+mhmcc.sample(iters,verbose=False)
+errors['mpmc_calib'] = mpmc.approx_error_data(mhmcc.db, tst_data, sel['tstl'],numlam=numlam)
+print("mpmc Calibrated error: %f" % errors['mpmc_calib'])
+
+output['acceptance_calib'] = float(mhmcc.accept_loc)/mhmcc.total_loc
+mhmcc.clean_db()
+########################################
+########################################
+########################################
+########################################
+########################################
 priorsigma = np.ones(4)*0.1
 pm0 = np.ones(4) * mu0
 pm1 = np.ones(4) * mu1
-ud = True
-dist0 = MPMDist(trn_data0,kmax=1,priorkappa=200,lammove=0.01,mumove=0.08,#S=S0,kappa=kappa,
-        priormu=pm0,priorsigma=priorsigma, usedata=ud)
-dist1 = MPMDist(trn_data1,kmax=1,priorkappa=200,lammove=0.01,mumove=0.08,#S=S1,kappa=kappa,
-        priormu=pm1, priorsigma=priorsigma, usedata=ud)
-mpm = MPMCls(dist0, dist1) 
-mhmc = mh.MHRun(mpm, burn=1000, thin=50)
-mhmc.sample(iters,verbose=False)
-errors['mpm_prior'] = mpm.approx_error_data(mhmc.db, tst_data, tst_labels,numlam=50)
+dist0 = MPMDist(rawdata.loc[sel['trn0'],sel['feats']],priorkappa=priorkappa,
+        lammove=lammove,mumove=mumove,
+        priormu=pm0,priorsigma=priorsigma)
+dist1 = MPMDist(rawdata.loc[sel['trn1'],sel['feats']],priorkappa=priorkappa,
+        lammove=lammove,mumove=mumove,
+        priormu=pm1,priorsigma=priorsigma)
+mpmp = MPMCls(dist0, dist1) 
+mhmcp = mh.MHRun(mpmp, burn=burn, thin=thin)
+mhmcp.sample(iters,verbose=False)
+errors['mpm_prior'] = mpmp.approx_error_data(mhmcp.db, tst_data, sel['tstl'],numlam=numlam)
 print("MPM prior Sampler error: %f" % errors['mpm_prior'])
-output['acceptance_prior'] = float(mhmc.accept_loc)/mhmc.total_loc
+output['acceptance_prior'] = float(mhmcp.accept_loc)/mhmcp.total_loc
+mhmcp.clean_db()
+########################################
+########################################
+########################################
+########################################
 
 output['seed'] = seed
 output['time'] = time()-t1
@@ -135,5 +175,4 @@ if 'WORKHASH' in os.environ:
     socket.close()
     ctx.term()
 
-mhmc.clean_db()
 
