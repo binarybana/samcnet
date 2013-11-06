@@ -117,6 +117,7 @@ cdef class MPMDist:
             wmove=None,birthmove=None,usepriors=True,usedata=True):
         self.green_factor = 0.0
 
+        data = np.array(data)
         self.data = data
         self.n = data.shape[0]
         self.D = data.shape[1]
