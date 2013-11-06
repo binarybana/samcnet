@@ -295,13 +295,29 @@ def get_data(method, params):
     trn = trn0 | trn1
     tst = tst0 | tst1
 
-    sel = dict(trn0=trn0, trn1=trn1, trn=trn, tst0=tst0, tst1=tst1, tst=tst, feats=feats, calib=calib)
+    # FIXME: Hack
+    trnl = (trn0*1 + trn1*2 - 1)[trn]
+    tstl = (tst0*1 + tst1*2 - 1)[tst]
+
+    num_calibs = setv(params, 'num_calibs', 5, int)
+    size_calibs = setv(params, 'size_calibs', 2, int)
+
+    subcalibs = calib.nonzero()[0]
+    clip_calibs = subcalibs.size - (num_calibs * size_calibs)
+    assert clip_calibs >= 0
+    np.random.shuffle(subcalibs)
+    subcalibs = np.split(subcalibs[:-clip_calibs], num_calibs)
+
+    sel = dict(trn0=trn0, trn1=trn1, trn=trn, tst0=tst0, tst1=tst1, tst=tst, 
+            feats=feats, calib=calib,
+            tstl=tstl, trnl=trnl,
+            subcalibs=subcalibs)
     # Normalize
     mu = rawdata[trn,:].mean(axis=0)
     std = np.sqrt(rawdata[trn,:].var(axis=0, ddof=1))
     normdata = (rawdata - mu) / std
     
-    return sel, rawdata, normdata
+    return sel, pa.DataFrame(rawdata), pa.DataFrame(normdata)
 
 if __name__ == '__main__':
     params = {}
@@ -351,6 +367,6 @@ if __name__ == '__main__':
 
     test(get_data(data_yj, params))
     test(get_data(data_jk, params))
-    get_data(data_tcga, params)
-    get_data(data_karen, params)
+    test(get_data(data_tcga, params))
+    test(get_data(data_karen, params))
 
