@@ -66,6 +66,7 @@ def calibrate(rawdata, sel, params):
         mhmc.sample(iters,verbose=False)
         paramlog0 = np.vstack(( paramlog0, calc_avgs(mhmc.db.root.object.dist0) ))
         paramlog1 = np.vstack(( paramlog1, calc_avgs(mhmc.db.root.object.dist1) ))
+        mhmc.clean_db()
 
     p0 = get_calibration_params(paramlog0, num_feat)
     p1 = get_calibration_params(paramlog1, num_feat)
