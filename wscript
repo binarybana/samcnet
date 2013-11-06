@@ -24,9 +24,10 @@ def configure(conf):
     conf.check(compiler='cc', lib='Judy', uselib_store='JUDY')
     conf.check(compiler='cc', lib='m', uselib_store='MATH')
     #conf.check(compiler='cc', lib='profiler', uselib_store='PROF')
-    conf.check_cxx(lib='dai', uselib_store='DAI')
     conf.check_cxx(lib='gmp', uselib_store='GMP')
     conf.check_cxx(lib='gmpxx', uselib_store='GMPXX')
+    conf.env.append_value('LINKFLAGS', '-lgmpxx')
+    conf.check_cxx(lib='dai', uselib_store='DAI')
 
 def build(bld):
     libs = 'JUDY MATH'.split()
@@ -78,14 +79,14 @@ def build(bld):
         ldflags=LDFLAGS,
         target='mh')
 
-    bld(features='c cshlib pyext',
-        source=['samcnet/bayesnet.pyx'],
-        includes=['samcnet/netcost'],
-        use='cost',
-        libpath=['.','./build'],
-        cflags=CFLAGS,
-        ldflags=LDFLAGS,
-        target='bayesnet')
+    #bld(features='c cshlib pyext',
+        #source=['samcnet/bayesnet.pyx'],
+        #includes=['samcnet/netcost'],
+        #use='cost',
+        #libpath=['.','./build'],
+        #cflags=CFLAGS,
+        #ldflags=LDFLAGS,
+        #target='bayesnet')
 
     bld(features='c cshlib pyext',
         source=['samcnet/mixturepoisson.pyx'],
@@ -96,35 +97,35 @@ def build(bld):
         ldflags=LDFLAGS,
         target='mixturepoisson')
 
-    bld(features='c cshlib cxx pyext',
-        source=['samcnet/probability.pyx'],
-        #libpath=['.','./build'],
-        includes=['deps/libdai/include'],
-        cxxflags=CXXFLAGS,
-        ldflags=LDFLAGS,
-        target='probability')
+    #bld(features='c cshlib cxx pyext',
+        #source=['samcnet/probability.pyx'],
+        ##libpath=['.','./build'],
+        #includes=['deps/libdai/include'],
+        #cxxflags=CXXFLAGS,
+        #ldflags=LDFLAGS,
+        #target='probability')
 
     libs = ['MATH', 'DAI', 'GMP', 'GMPXX']
 
-    bld(features='c cshlib cxx pyext',
-        source=['samcnet/bayesnetcpd.pyx', 'samcnet/utils.cpp'],
-        includes=['deps/libdai/include','include'],
-        libpath=['lib','.','./build'],
-        use=libs,
-        cxxflags=CXXFLAGS,
-        ldflags=LDFLAGS,
-        target='bayesnetcpd')
+    #bld(features='c cshlib cxx pyext',
+        #source=['samcnet/bayesnetcpd.pyx', 'samcnet/utils.cpp'],
+        #includes=['deps/libdai/include','include'],
+        #libpath=['lib','.','./build'],
+        #use=libs,
+        #cxxflags=CXXFLAGS,
+        #ldflags=LDFLAGS,
+        #target='bayesnetcpd')
 
-    CFLAGS.remove('-Wall')
+    #CFLAGS.remove('-Wall')
     
-    bld(features='c cshlib cxx pyext',
-        source=['samcnet/pydai.pyx'],
-        libpath=['lib','.','build'],
-        includes=['deps/libdai/include'],
-        use=libs,
-        cxxflags=CXXFLAGS,
-        ldflags=LDFLAGS,
-        target='pydai')
+    #bld(features='c cshlib cxx pyext',
+        #source=['samcnet/pydai.pyx'],
+        #libpath=['lib','.','build'],
+        #includes=['deps/libdai/include'],
+        #use=libs,
+        #cxxflags=CXXFLAGS,
+        #ldflags=LDFLAGS,
+        #target='pydai')
 
     #bld.env['PREFIX'] = '.'
     #for x in 'dai.so probability.so bayesnetcpd.so bayesnet.so samc.so cost.so'.split():
