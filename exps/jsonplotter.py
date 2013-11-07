@@ -44,7 +44,7 @@ ind = np.argsort(dependent_var)
 markers = list('xD*o>s^<+')
 offset = 0
 key = {'gauss':'Normal OBC', 'svm':'SVM', 'knn':'3NN', 'lda':'LDA', 'mpm':'MP OBC',
-        'mpm_prior':'MP OBC Prior'}
+        'mpm_prior':'MP OBC Prior', 'mpmc_calib':'MP OBC Calibrated'}
 
 def adjust_plot():
     lx,ux,ly,uy = p.axis()
