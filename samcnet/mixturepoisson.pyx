@@ -139,6 +139,16 @@ cdef class MPMDist:
         self.usedata=usedata
 
         self.kmax = 1 if kmax is None else kmax
+
+        # Make sure S is pos def:
+        try:
+            np.linalg.cholesky(self.S)
+        except np.linalg.LinAlgError:
+            sys.stderr.write("Singular S matrix\n")
+            sys.stderr.write(str(S))
+            sys.stderr.flush()
+            raise
+
         ######## Starting point of MCMC Run #######
         self.curr = MPMParams(self.D, self.kmax, self.n)
         self.old = MPMParams(self.D, self.kmax, self.n)
