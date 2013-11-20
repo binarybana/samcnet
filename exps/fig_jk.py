@@ -9,6 +9,7 @@ import subprocess as sb
 from time import time,sleep
 from os import path
 from scipy.stats.mstats import mquantiles
+import scipy.stats.distributions as di
 
 try:
     from sklearn.lda import LDA
@@ -38,22 +39,39 @@ else:
 
 iters = setv(params, 'iters', int(1e4), int)
 
-num_feat = setv(params, 'num_feat', 4, int)
 seed = setv(params, 'seed', np.random.randint(10**8), int)
 rseed = setv(params, 'rseed', np.random.randint(10**8), int)
 
+# Synthetic Params
 Ntrn = setv(params, 'Ntrn', 20, int)
 Ntst = setv(params, 'Ntst', 3000, int)
-mu0 = setv(params, 'mu0', 0.0, float)
-mu1 = setv(params, 'mu1', 0.6, float)
-sigma0 = setv(params, 'sigma0', 0.2, float)
-sigma1 = setv(params, 'sigma1', 0.6, float)
-kappa = setv(params, 'kappa', 30.0, float)
+mu0 = setv(params, 'mu0', np.random.randn()*0.2, float)
+mu1 = setv(params, 'mu1', np.random.randn()*0.2, float)
+sigma0 = setv(params, 'sigma0', di.invgamma.rvs(3), float)
+sigma1 = setv(params, 'sigma1', di.invgamma.rvs(3), float)
 
+### For YJ ####
+f_glob = setv(params, 'f_glob', 10, int)
+subclasses = setv(params, 'subclasses', 2, int)
+f_het = setv(params, 'f_het', 20, int)
+f_rand = setv(params, 'f_rand', 20, int)
+rho = setv(params, 'rho', np.random.rand(), float)
+f_tot = setv(params, 'f_tot', f_glob+f_het*subclasses+f_rand, float)
+blocksize = setv(params, 'blocksize', 5, int)
+############
+
+### For JK ###
+num_gen_feat = setv(params, 'num_gen_feat', 20, int)
 lowd = setv(params, 'lowd', 9.0, float)
 highd = setv(params, 'highd', 11.0, float)
+#kappa = setv(params, 'kappa', 2000, float)
+#kappa = setv(params, 'kappa', 22.0, float)
+##############
 
-num_gen_feat = setv(params, 'num_gen_feat', 20, int)
+# Final number of features
+num_feat = setv(params, 'num_feat', 4, int)
+
+# MCMC
 mumove = setv(params, 'mumove', 0.08, float)
 lammove = setv(params, 'lammove', 0.01, float)
 priorkappa = setv(params, 'priorkappa', 150, int)
@@ -65,9 +83,9 @@ output = {}
 output['errors'] = {}
 errors = output['errors']
 np.seterr(all='ignore') # Careful with this
-rseed = np.random.randint(10**8)
 
-sel, rawdata, normdata = get_data(data_jk, params)
+sel, rawdata, normdata = get_data(data_yj, params)
+
 norm_trn_data = normdata.loc[sel['trn'], sel['feats']]
 norm_tst_data = normdata.loc[sel['tst'], sel['feats']]
 tst_data = rawdata.loc[sel['tst'], sel['feats']]
@@ -87,11 +105,12 @@ print("skLDA error: %f" % errors['lda'])
 print("skKNN error: %f" % errors['knn'])
 print("skSVM error: %f" % errors['svm'])
 
-bayes0 = GaussianBayes(np.zeros(num_feat), 1, kappa, 
-        np.eye(num_feat)*(kappa-1-num_feat), 
+lorikappa = 10
+bayes0 = GaussianBayes(np.zeros(num_feat), 1, lorikappa, 
+        np.eye(num_feat)*(lorikappa-1-num_feat), 
         normdata.loc[sel['trn0'], sel['feats']])
-bayes1 = GaussianBayes(np.zeros(num_feat), 1, kappa,
-        np.eye(num_feat)*(kappa-1-num_feat), 
+bayes1 = GaussianBayes(np.zeros(num_feat), 1, lorikappa,
+        np.eye(num_feat)*(lorikappa-1-num_feat), 
         normdata.loc[sel['trn1'], sel['feats']])
 
 # Gaussian Analytic
