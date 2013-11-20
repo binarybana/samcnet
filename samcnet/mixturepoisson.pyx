@@ -7,7 +7,6 @@ import sys
 import numpy as np
 cimport numpy as np
 
-import pylab as p
 import tables as t
 import matplotlib as mpl
 import random
@@ -156,10 +155,10 @@ cdef class MPMDist:
         self.curr.k = 1 if startk is None else startk
         if d is None:
             self.curr.d = 10 * np.ones(self.n) 
-        elif type(d) is float:
-            self.curr.d = d * np.ones(self.n)
-        else:
+        elif type(d) is np.ndarray:
             self.curr.d = d.copy()
+        else:
+            self.curr.d = d * np.ones(self.n)
 
         assert self.curr.d.size == self.n, "d must be vector of length n"
 
@@ -419,6 +418,7 @@ cdef class MPMDist:
         return np.log(res / parts.sum())
 
     def plot_traces(self, db, node, names=None):
+        import pylab as p
         for curr in db.getNode(node):
             if issubclass(type(curr), t.Array):
                 if names is None or curr.name in names:
