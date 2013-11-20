@@ -31,22 +31,37 @@ def calc_avgs(db):
 
 def get_calibration_params(params, D):
     meanp = params.mean(axis=0)
+    S=rho_matrix(D, meanp[2], meanp[3]*meanp[2])
+    try:
+        np.linalg.cholesky(S)
+    except np.linalg.LinAlgError:
+        S = rho_matrix(D, meanp[2], 0.0)
     return dict(
             priormu=np.ones(D)*meanp[0], 
             priorsigma=np.ones(D)*meanp[1], 
             kappa=int(meanp[4]),
-            S=rho_matrix(D, meanp[2], meanp[3]*meanp[2]))
+            S=S)
 
 def get_calibration(db):
     p0 = get_calibration_params(db.root.object.dist0)
     p1 = get_calibration_params(db.root.object.dist1)
     return p0, p1
 
+def record_hypers(output, p0, p1):
+    for k in p0.keys():
+        if type(p0[k]) == np.ndarray:
+            output['p0_'+k] = list(p0[k].flat)
+            output['p1_'+k] = list(p1[k].flat)
+        else:
+            output['p0_'+k] = p0[k]
+            output['p1_'+k] = p1[k]
+
 def calibrate(rawdata, sel, params):
     iters = params['iters']
     num_feat = params['num_feat']
     burn = params['burn']
     thin = params['thin']
+    d = params.get('d', 10)
 
     paramlog0 = np.empty((0,5), dtype=float)
     paramlog1 = np.empty((0,5), dtype=float)
@@ -55,11 +70,13 @@ def calibrate(rawdata, sel, params):
             priorkappa=params['priorkappa'],
             lammove=params['lammove'],
             mumove=params['mumove'],
+            d=d,
             usepriors=False)
         dist1 = MPMDist(rawdata.loc[sel['trn1'],feats],
             priorkappa=params['priorkappa'],
             lammove=params['lammove'],
             mumove=params['mumove'],
+            d=d,
             usepriors=False)
         mpm = MPMCls(dist0, dist1) 
         mhmc = mh.MHRun(mpm, burn=burn, thin=thin, verbose=False)
