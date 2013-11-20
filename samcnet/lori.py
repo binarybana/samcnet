@@ -2,7 +2,6 @@ from __future__ import division
 import sys
 
 import numpy as np
-import pylab as p
 import tables as t
 import matplotlib as mpl
 import random
@@ -591,6 +590,7 @@ def plot_ellipse(splot, mean, cov, color):
     splot.add_artist(ell)
 
 def plot_gaussian():
+    import pylab as p
     ## First generate true distributions and data
     #cval, dist0, dist1 = gen_dists()
     
