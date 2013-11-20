@@ -52,7 +52,7 @@ def adjust_plot():
     yl = uy - ly
     p.axis((lx-xl*0.1, ux+xl*0.1, ly-yl*0.1, uy+yl*0.1))
 
-p.close('all')
+#p.close('all')
 
 offset = 0
 p.figure()
@@ -71,22 +71,22 @@ p.xlabel('Training samples per class')
 p.grid(True)
 adjust_plot()
 
-p.figure()
-for i in range(len(df.columns)):
-    if df.columns[i] == 'mpm':
-        continue
-    diffs = [alldata[j].iloc[:,i]-alldata[j].loc[:,'mpm'] for j in dependent_var[ind]]
-    diffdf = pa.concat(diffs, keys=dependent_var[ind], axis=1)
-    p.errorbar(dependent_var[ind]+offset, diffdf.mean(), yerr=diffdf.std(), marker='o',
-            label=key[df.columns[i]])
-    offset += 0.01
-p.legend()
-p.ylabel('Holdout error - Holdout error for MP OBC')
-p.xlabel('Training samples per class')
-p.grid(True)
-adjust_plot()
+#p.figure()
+#for i in range(len(df.columns)):
+    #if df.columns[i] == 'mpm':
+        #continue
+    #diffs = [alldata[j].iloc[:,i]-alldata[j].loc[:,'mpm'] for j in dependent_var[ind]]
+    #diffdf = pa.concat(diffs, keys=dependent_var[ind], axis=1)
+    #p.errorbar(dependent_var[ind]+offset, diffdf.mean(), yerr=diffdf.std(), marker='o',
+            #label=key[df.columns[i]])
+    #offset += 0.01
+#p.legend()
+#p.ylabel('Holdout error - Holdout error for MP OBC')
+#p.xlabel('Training samples per class')
+#p.grid(True)
+#adjust_plot()
 
-#p.title(jobhash[:6] + ' ' + db.get_description(jobhash))
+p.title(jobhash[:6] + ' ' + db.get_description(jobhash))
 #p.xlabel('Number of final features')
 #p.xlabel('mu1')
 
