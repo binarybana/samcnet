@@ -72,19 +72,29 @@ def data_yj(params):
     finally:
         os.chdir(currdir)
 
-    raw_trn_data = np.loadtxt(path.join(synloc, 'out','%s_trn.txt'%fname),
-        delimiter=',', skiprows=1)
-    selector = SelectKBest(f_classif, k=num_feat)
-    trn_labels = np.hstack(( np.zeros(Ntrn), np.ones(Ntrn) ))
-    selector.fit(raw_trn_data, trn_labels)
+    try:
+        trn_path = path.join(synloc, 'out','%s_trn.txt'%fname)
+        tst_path = path.join(synloc, 'out','%s_tst.txt'%fname)
 
-    raw_tst_data = np.loadtxt(path.join(synloc, 'out','%s_tst.txt'%fname),
+        raw_trn_data = np.loadtxt(trn_path,
             delimiter=',', skiprows=1)
+        selector = SelectKBest(f_classif, k=num_feat)
+        trn_labels = np.hstack(( np.zeros(Ntrn), np.ones(Ntrn) ))
+        selector.fit(raw_trn_data, trn_labels)
+
+        raw_tst_data = np.loadtxt(tst_path,
+                delimiter=',', skiprows=1)
+    finally:
+        os.remove(trn_path)
+        os.remove(tst_path)
 
     trn0, trn1, tst0, tst1 = gen_labels(Ntrn, Ntrn, Ntst, Ntst)
     rawdata = np.vstack(( raw_trn_data, raw_tst_data ))
 
     pvind = selector.pvalues_.argsort()
+
+    np.random.shuffle(pvind)
+
     feats = np.zeros(rawdata.shape[1], dtype=bool)
     feats[pvind[:num_feat]] = True
     calib = ~feats
@@ -124,8 +134,14 @@ def data_jk(params):
     #cov1 = np.array([[1, rho1],[rho1, 1]])
     #cov0 = np.eye(D) 
     #cov1 = np.eye(D) 
-    cov0 = sample_invwishart(np.eye(D)*(kappa-D-1)*sigma0, kappa) 
-    cov1 = sample_invwishart(np.eye(D)*(kappa-D-1)*sigma1, kappa) 
+    if kappa >= 1000:
+        cov0 = sample_invwishart(np.eye(D)*sigma0, D+2) 
+        cov1 = sample_invwishart(np.eye(D)*sigma1, D+2) 
+        cov0 = np.diag(np.diag(cov0))
+        cov1 = np.diag(np.diag(cov1))
+    else:
+        cov0 = sample_invwishart(np.eye(D)*(kappa-D-1)*sigma0, kappa) 
+        cov1 = sample_invwishart(np.eye(D)*(kappa-D-1)*sigma1, kappa) 
     #v1,v2 = 0.2,1.3
     #cov1 = cov0
     #trn_data0 = np.vstack (( gen_data(np.array([v1, v2]),cov0,Ntrn/2), 
@@ -149,6 +165,8 @@ def data_jk(params):
     selector.fit(trn_data, trn_labels)
     pvind = selector.pvalues_.argsort()
 
+    np.random.shuffle(pvind)
+
     feats = np.zeros(rawdata.shape[1], dtype=bool)
     feats[pvind[:num_feat]] = True
     #feats[:num_feat] = True
@@ -158,6 +176,8 @@ def data_jk(params):
 def data_tcga(params):
     Ntrn = params['Ntrn']
     num_feat = params['num_feat']
+    low = params['low_filter']
+    high = params['high_filter']
 
     store = pa.HDFStore(os.path.expanduser('~/largeresearch/seq-data/store.h5'))
     luad = store['lusc_norm'].as_matrix()
@@ -181,12 +201,28 @@ def data_tcga(params):
 
     # Select a subset of the features, then select a further subset based on
     # Univariate F tests
-    good_cols = (trn_data.mean(axis=0) < 10) & (trn_data.mean(axis=0) > 1)
+    good_cols = (trn_data.mean(axis=0) < high) & (trn_data.mean(axis=0) > low)
     low_trn_data = trn_data[:, good_cols]
     low_tst_data = tst_data[:, good_cols]
     selector = SelectKBest(f_classif, k=4)
     selector.fit(low_trn_data, trn_labels)
     pvind = selector.pvalues_.argsort()
+
+    ##########
+    tst_labels = np.hstack(( np.zeros(lusc_inds.size-Ntrn), np.ones(luad_inds.size-Ntrn) ))
+    pvind2 = selector.pvalues_.argsort()
+    selector2 = SelectKBest(f_classif, k=4)
+    selector2.fit(low_tst_data, tst_labels)
+
+    print low, high
+    print trn_data.shape[1]
+    print good_cols.sum()
+    print selector.pvalues_[pvind[:10]]
+    print selector.pvalues_[pvind[-10:]]
+
+    print selector2.pvalues_[pvind2[:10]]
+    print selector2.pvalues_[pvind2[-10:]]
+    ###################
 
     rawdata = np.vstack(( low_trn_data, low_tst_data ))
 
@@ -205,18 +241,19 @@ def data_karen(params):
     low = params['low_filter']
     high = params['high_filter']
     num_candidates = params['num_candidates']
+    cat = params['split_category']
+    use_candidates = params['use_candidates']
 
     datapath = os.path.expanduser('~/GSP/research/samc/samcnet/data/')
-    store = pa.HDFStore(datapath+'karen-clean1.h5')
+    store = pa.HDFStore(datapath+'karen-clean2.h5')
     data = store['data']
     store.close()
 
     #num_cols = pa.Index(map(str.strip,open(datapath+'colon_rat.txt','r').readlines()))
-    num_cols = data.columns - pa.Index(['Diet', 'treatment'])
+    num_cols = data.columns - pa.Index(['oil', 'fiber', 'treatment'])
     numdata = data[num_cols]
 
-    cat = 'treatment'
-    cls0 = 'AOM'
+    cls0 = data.loc[:,cat].iloc[0]
 
     aom = data[cat] == cls0
     aom_inds = data.index[aom]
@@ -224,7 +261,7 @@ def data_karen(params):
     trn_inds = pa.Index(np.random.choice(aom_inds, Ntrn, replace=False)) \
             + pa.Index(np.random.choice(saline_inds, Ntrn, replace=False))
     tst_inds = data.index - trn_inds
-    trn_labels = np.array((data.loc[trn_inds, 'treatment']=='AOM').astype(np.int64) * 1)
+    trn_labels = np.array((data.loc[trn_inds, cat]==cls0).astype(np.int64) * 1)
 
     # Feature selection, first stage
     good_cols = numdata.columns[(numdata.mean() <= high) & (numdata.mean() >= low)]
@@ -238,6 +275,9 @@ def data_karen(params):
     pvind = selector.pvalues_.argsort()
     #print(selector.pvalues_[pvind2[:50]])
 
+    if not use_candidates:
+        np.random.shuffle(pvind)
+
     rawdata = numdata[good_cols].as_matrix()
 
     candidates = pvind[:num_candidates]
@@ -246,14 +286,24 @@ def data_karen(params):
     feats[feats_ind] = True
     calib = ~feats
 
-    trn0 = np.array(data.loc[trn_inds, cat] == cls0, dtype=bool)
-    trn1 = np.array(data.loc[trn_inds, cat] != cls0, dtype=bool)
-    tst0 = np.array(data.loc[tst_inds, cat] == cls0, dtype=bool)
-    tst1 = np.array(data.loc[tst_inds, cat] != cls0, dtype=bool)
-    
+    # It's hideous!!!
+    # Wow... converting from indices/numeric locations to a boolean array
+    # has never looked so ugly... but it works for now.
+    trn0 = pa.Series(np.zeros(data.index.size), index=data.index, dtype=bool)
+    trn1 = pa.Series(np.zeros(data.index.size), index=data.index, dtype=bool)
+    tst0 = pa.Series(np.zeros(data.index.size), index=data.index, dtype=bool)
+    tst1 = pa.Series(np.zeros(data.index.size), index=data.index, dtype=bool)
+
+    trn0.loc[trn_inds & data.index[(data.loc[:, cat] == cls0)]] = True
+    trn1.loc[trn_inds & data.index[(data.loc[:, cat] != cls0)]] = True
+    tst0.loc[tst_inds & data.index[(data.loc[:, cat] == cls0)]] = True
+    tst1.loc[tst_inds & data.index[(data.loc[:, cat] != cls0)]] = True
+
+    trn0 = np.array(trn0)
+    trn1 = np.array(trn1)
+    tst0 = np.array(tst0)
+    tst1 = np.array(tst1)
     return rawdata, trn0, trn1, tst0, tst1, feats, calib
-    #return numdata.ix[trn_inds, good_cols[feats]].as_matrix(), trn_labels, \
-            #numdata.ix[tst_inds, good_cols[feats]].as_matrix(), tst_labels
 
 def data_test(params):
     trn_data = np.vstack(( np.zeros((10,2)), np.ones((10,2))+2 )) 
@@ -284,6 +334,29 @@ def gen_labels(a,b,c,d):
     #np.random.shuffle(ind)
     #return trn[:,ind], tst[:,ind]
 
+def subsample(sel, N=1):
+    """ 
+    Takes N samples from each class's training sample and moves them to holdout 
+    """
+    s0 = np.random.choice(sel['trn0'].nonzero()[0], size=N, replace=False)
+    s1 = np.random.choice(sel['trn1'].nonzero()[0], size=N, replace=False)
+
+    sel['trn0'][s0] = False
+    sel['trn'][s0] = False
+    sel['tst0'][s0] = True
+    sel['tst'][s0] = True
+
+    sel['trn1'][s1] = False
+    sel['trn'][s1] = False
+    sel['tst1'][s1] = True
+    sel['tst'][s1] = True
+
+    # FIXME: Hack
+    sel['trnl'] = (sel['trn0']*1 + sel['trn1']*2 - 1)[sel['trn']]
+    sel['tstl'] = (sel['tst0']*1 + sel['tst1']*2 - 1)[sel['tst']]
+
+    return sel
+
 def get_data(method, params):
     """
     Returns a selector dictionary, rawdata matrix and normalized data matrix
@@ -304,7 +377,7 @@ def get_data(method, params):
 
     subcalibs = calib.nonzero()[0]
     clip_calibs = subcalibs.size - (num_calibs * size_calibs)
-    assert clip_calibs >= 0
+    assert clip_calibs >= 0, clip_calibs
     np.random.shuffle(subcalibs)
     subcalibs = np.split(subcalibs[:-clip_calibs], num_calibs)
 
@@ -332,38 +405,41 @@ if __name__ == '__main__':
             p[s]
 
     iters = setv(params, 'iters', int(1e4), int)
-    num_feat = setv(params, 'num_feat', 2, int)
-    num_feat = setv(params, 'num_gen_feat', 4, int)
+    num_feat = setv(params, 'num_feat', 5, int)
+    num_gen_feat = setv(params, 'num_gen_feat', 30, int)
     seed = setv(params, 'seed', np.random.randint(10**8), int)
     rseed = setv(params, 'rseed', np.random.randint(10**8), int)
     Ntrn = setv(params, 'Ntrn', 20, int)
-    Ntst = setv(params, 'Ntst', 3000, int)
-    f_glob = setv(params, 'f_glob', 2, int)
+    Ntst = setv(params, 'Ntst', 300, int)
+    f_glob = setv(params, 'f_glob', 10, int)
     subclasses = setv(params, 'subclasses', 2, int)
-    f_het = setv(params, 'f_het', 1, int)
-    f_rand = setv(params, 'f_rand', 0, int)
+    f_het = setv(params, 'f_het', 20, int)
+    f_rand = setv(params, 'f_rand', 20, int)
     rho = setv(params, 'rho', 0.6, float)
     f_tot = setv(params, 'f_tot', f_glob+f_het*subclasses+f_rand, int) 
-    blocksize = setv(params, 'blocksize', 1, int)
+    blocksize = setv(params, 'blocksize', 5, int)
     mu0 = setv(params, 'mu0', -1.2, float)
     mu1 = setv(params, 'mu1', -0.2, float)
     sigma0 = setv(params, 'sigma0', 0.5, float)
     sigma1 = setv(params, 'sigma1', 0.2, float)
-    kappa = setv(params, 'kappa', 10.0, float)
+    kappa = setv(params, 'kappa', 32.0, float)
     lowd = setv(params, 'lowd', 9.0, float)
     highd = setv(params, 'highd', 11.0, float)
     numlam = setv(params, 'numlam', 20, int)
     low = setv(params, 'low_filter', 3, int)
     high = setv(params, 'high_filter', 30, int)
     num_candidates = setv(params, 'num_candidates', 50, int)
+    cat = setv(params, 'split_category', 'treatment', str)
+    use_candidates = setv(params, 'use_candidate', False, bool)
 
     def test(out):
         sel, raw, norm = out
         assert raw.shape == norm.shape
         for k,v in sel.iteritems():
-            assert v.sum() > 0, str(k) + str(v.shape)
-            assert v.sum() < max(raw.shape)
-            assert v.shape[0] == raw.shape[0] or v.shape[0] == raw.shape[1]
+            if type(v) == np.ndarray:
+                assert v.sum() > 0, str(k) + str(v.shape)
+                assert v.sum() < max(raw.shape)
+                #assert v.shape[0] == raw.shape[0] or v.shape[0] == raw.shape[1]
 
     test(get_data(data_yj, params))
     test(get_data(data_jk, params))
