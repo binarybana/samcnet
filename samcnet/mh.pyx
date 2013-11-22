@@ -137,7 +137,7 @@ cdef class MHRun:
             dbsize = 0
         self.init_db(dbsize)
         
-        if verbose:
+        if self.verbose:
             print("Initial Energy: %g" % oldenergy)
 
         for current_iter in range(self.iteration, self.iteration + int(iters)):
@@ -175,13 +175,13 @@ cdef class MHRun:
                 self.save_iter_db(oldenergy, 
                                 (current_iter-self.burn)//self.thin)
 
-            if self.iteration % 1000 == 0 and verbose:
+            if self.iteration % 1000 == 0 and self.verbose:
                 print("Iteration: %8d, best energy: %7g, current energy: %7g" % \
                         (self.iteration, self.mapenergy, newenergy))
 
         self.save_state_db()
 
-        if verbose:
+        if self.verbose:
             ###### Calculate summary statistics #######
             print("Accept_loc: %d" % self.accept_loc)
             print("Total_loc: %d" % self.total_loc)
