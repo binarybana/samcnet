@@ -319,6 +319,18 @@ def gen_labels(a,b,c,d):
     tst1 = np.hstack(( np.zeros(a+b), np.zeros(c), np.ones(d) )).astype(bool)
     return trn0, trn1, tst0, tst1
 
+def plot_p_hist(data, sel, label):
+    selector = SelectKBest(f_classif, k=4)
+    print sel['tst'].shape
+    print data.loc[sel['tst'],:].shape
+    selector.fit(data.loc[sel['tst'], :], sel['tstl'])
+    pvals = selector.pvalues_
+    pvind = pvals.argsort()
+    pvals[np.isnan(pvals)] = 1
+
+    import pylab as p
+    p.hist(pvals, bins=np.logspace(-5,0,30), label=label, log=True, histtype='step')
+
 #def norm(data1, data2):
     #mu = data1.mean(axis=0)
     #std = np.sqrt(data1.var(axis=0, ddof=1))
@@ -392,17 +404,17 @@ def get_data(method, params):
     
     return sel, pa.DataFrame(rawdata), pa.DataFrame(normdata)
 
-if __name__ == '__main__':
-    params = {}
+def setv(p,s,d,conv=None): 
+    if s not in p:
+        p[s] = d
+        return d
+    elif conv is not None:
+        return conv(p[s])
+    else:
+        p[s]
 
-    def setv(p,s,d,conv=None): 
-        if s not in p:
-            p[s] = d
-            return d
-        elif conv is not None:
-            return conv(p[s])
-        else:
-            p[s]
+def get_test_params():
+    params = {}
 
     iters = setv(params, 'iters', int(1e4), int)
     num_feat = setv(params, 'num_feat', 5, int)
@@ -418,19 +430,44 @@ if __name__ == '__main__':
     rho = setv(params, 'rho', 0.6, float)
     f_tot = setv(params, 'f_tot', f_glob+f_het*subclasses+f_rand, int) 
     blocksize = setv(params, 'blocksize', 5, int)
-    mu0 = setv(params, 'mu0', -1.2, float)
-    mu1 = setv(params, 'mu1', -0.2, float)
-    sigma0 = setv(params, 'sigma0', 0.5, float)
+    mu0 = setv(params, 'mu0', 0.8, float)
+    mu1 = setv(params, 'mu1', -0.8, float)
+    sigma0 = setv(params, 'sigma0', 0.6, float)
     sigma1 = setv(params, 'sigma1', 0.2, float)
     kappa = setv(params, 'kappa', 32.0, float)
     lowd = setv(params, 'lowd', 9.0, float)
     highd = setv(params, 'highd', 11.0, float)
     numlam = setv(params, 'numlam', 20, int)
-    low = setv(params, 'low_filter', 3, int)
-    high = setv(params, 'high_filter', 30, int)
+    low = setv(params, 'low_filter', 1, int)
+    high = setv(params, 'high_filter', 10, int)
     num_candidates = setv(params, 'num_candidates', 50, int)
     cat = setv(params, 'split_category', 'treatment', str)
-    use_candidates = setv(params, 'use_candidate', False, bool)
+    use_candidates = setv(params, 'use_candidates', False, bool)
+    return params
+
+if __name__ == '__main__':
+    import pylab as p
+    p.figure()
+
+    params = get_test_params()
+    sel, raw, norm = get_data(data_tcga, params)
+    plot_p_hist(raw, sel, 'tcga low')
+
+    sel, raw, norm = get_data(data_karen, params)
+    plot_p_hist(raw, sel, 'karen low')
+
+    params['low_filter'] = 0
+    params['high_filter'] = 10000
+    sel, raw, norm = get_data(data_karen, params)
+    plot_p_hist(raw, sel, 'karen all')
+
+    sel, raw, norm = get_data(data_jk, params)
+    plot_p_hist(raw, sel, 'ic')
+
+    p.legend(loc='best')
+    #p.xscale('log')
+    p.show()
+    sys.exit()
 
     def test(out):
         sel, raw, norm = out
