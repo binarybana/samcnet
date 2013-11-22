@@ -7,45 +7,36 @@ def rho_matrix(p, diag, offdiag):
     return np.diag(np.ones(p) * diag) + (np.ones((p,p)) - np.eye(p)) * offdiag
 
 def calc_avgs(db):
-    #p['priormu'] = db.mu.read().mean(axis=0)
-    #p['priorsigma'] = db.mu.read().std(axis=0)
-
-    ## Will eventually want to sample these two many times....
-    #eS = db.sigma.read().mean(axis=0)
-    #varS = db.sigma.read().std(axis=0)
-
-    #p['kappa'] = 2*eS[0,0]**2 / varS[0,0] + D + 3
-    #sig = (p['kappa'] - D - 1) * eS[0,0]
-    #rho = eS[0,1] / eS[0,0]
-    #p['S'] = rho_matrix(D, eS[0,0], rho)
     D = db.mu.read()[0].size
     mumean = db.mu.read().mean()
     muvar = db.mu.read().std(axis=0).mean()
     sigmean = db.sigma.read().mean(axis=0)
-    sigvar = db.sigma.read().std(axis=0)
-    sigdiagmean = (sigmean[0,0] + sigmean[1,1]) / 2.0
-    sigdiagvar = (sigvar[0,0] + sigvar[1,1]) / 2.0
-    rho = sigmean[0,1] / sigdiagmean
-    kappa = 2*sigdiagmean**2 / sigdiagvar + D + 3
-    return np.r_[mumean, muvar, sigdiagvar, rho, kappa]
+    return np.r_[mumean, sigmean[0,0], sigmean[1,1], sigmean[0,1]]
 
 def get_calibration_params(params, D):
     meanp = params.mean(axis=0)
-    S=rho_matrix(D, meanp[2], meanp[3]*meanp[2])
+    mumean = meanp[0]
+    muvar = params[:,0].var(ddof=1)
+
+    diags = params[:,[1,2]]
+    sigdiagmean = diags.mean()
+    sigoffmean = params[:,3].mean()
+
+    sigdiagvar = 1./(diags.size - 1) * (sigdiagmean - diags.flatten())**2 
+    sigma2 = 2 * sigdiagmean * (sigdiagmean**2/sigdiagvar + 1)
+    rho = sigoffmean/sigdiagmean
+    kappa = 2*sigdiagmean**2 / sigdiagvar + D + 3
+
+    S=rho_matrix(D, sigma2, sigma2*rho)
     try:
         np.linalg.cholesky(S)
     except np.linalg.LinAlgError:
         S = rho_matrix(D, meanp[2], 0.0)
     return dict(
-            priormu=np.ones(D)*meanp[0], 
-            priorsigma=np.ones(D)*meanp[1], 
-            kappa=int(meanp[4]),
+            priormu=np.ones(D) * mumean,
+            priorsigma=np.ones(D) * muvar,
+            kappa=int(kappa),
             S=S)
-
-def get_calibration(db):
-    p0 = get_calibration_params(db.root.object.dist0)
-    p1 = get_calibration_params(db.root.object.dist1)
-    return p0, p1
 
 def record_hypers(output, p0, p1):
     for k in p0.keys():
