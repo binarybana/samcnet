@@ -22,7 +22,7 @@ def get_calibration_params(params, D):
     sigdiagmean = diags.mean()
     sigoffmean = params[:,3].mean()
 
-    sigdiagvar = 1./(diags.size - 1) * (sigdiagmean - diags.flatten())**2 
+    sigdiagvar = 1./(diags.size - 1) * ((sigdiagmean - diags.flatten())**2).sum()
     sigma2 = 2 * sigdiagmean * (sigdiagmean**2/sigdiagvar + 1)
     rho = sigoffmean/sigdiagmean
     kappa = 2*sigdiagmean**2 / sigdiagvar + D + 3
@@ -31,7 +31,7 @@ def get_calibration_params(params, D):
     try:
         np.linalg.cholesky(S)
     except np.linalg.LinAlgError:
-        S = rho_matrix(D, meanp[2], 0.0)
+        S = rho_matrix(D, sigma2, 0.0)
     return dict(
             priormu=np.ones(D) * mumean,
             priorsigma=np.ones(D) * muvar,
@@ -54,8 +54,8 @@ def calibrate(rawdata, sel, params):
     thin = params['thin']
     d = params.get('d', 10)
 
-    paramlog0 = np.empty((0,5), dtype=float)
-    paramlog1 = np.empty((0,5), dtype=float)
+    paramlog0 = np.empty((0,4), dtype=float)
+    paramlog1 = np.empty((0,4), dtype=float)
     for feats in sel['subcalibs']:
         dist0 = MPMDist(rawdata.loc[sel['trn0'],feats],
             priorkappa=params['priorkappa'],
