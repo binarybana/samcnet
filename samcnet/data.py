@@ -179,6 +179,15 @@ def data_tcga(params):
     low = params['low_filter']
     high = params['high_filter']
 
+    if 'c' in params:
+        #Interpret Ntrn as total training samples
+        Ntrn0 = int(round(params['c'] * Ntrn))
+        Ntrn1 = int(round((1-params['c']) * Ntrn))
+    else:
+        Ntrn0, Ntrn1 = Ntrn, Ntrn
+
+    print("Training data sizes: {}, {}".format(Ntrn0, Ntrn1))
+
     store = pa.HDFStore(os.path.expanduser('~/largeresearch/seq-data/store.h5'))
     luad = store['lusc_norm'].as_matrix()
     lusc = store['luad_norm'].as_matrix()
@@ -189,39 +198,39 @@ def data_tcga(params):
     np.random.shuffle(luad_inds)
     np.random.shuffle(lusc_inds)
     trn_data = np.round(np.hstack(( 
-        lusc[:,lusc_inds[:Ntrn]], 
-        luad[:,luad_inds[:Ntrn]] )).T)
+        lusc[:,lusc_inds[:Ntrn0]], 
+        luad[:,luad_inds[:Ntrn1]] )).T)
     tst_data = np.round(np.hstack(( 
-        lusc[:,lusc_inds[Ntrn:]], 
-        luad[:,luad_inds[Ntrn:]] )).T)
+        lusc[:,lusc_inds[Ntrn0:]], 
+        luad[:,luad_inds[Ntrn1:]] )).T)
 
     # Generate labels
-    trn_labels = np.hstack(( np.zeros(Ntrn), np.ones(Ntrn) ))
-    trn0, trn1, tst0, tst1 = gen_labels(Ntrn, Ntrn, lusc.shape[1]-Ntrn, luad.shape[1]-Ntrn)
+    trn_labels = np.hstack(( np.zeros(Ntrn0), np.ones(Ntrn1) ))
+    trn0, trn1, tst0, tst1 = gen_labels(Ntrn0, Ntrn1, lusc.shape[1]-Ntrn0, luad.shape[1]-Ntrn1)
 
     # Select a subset of the features, then select a further subset based on
     # Univariate F tests
     good_cols = (trn_data.mean(axis=0) < high) & (trn_data.mean(axis=0) > low)
     low_trn_data = trn_data[:, good_cols]
     low_tst_data = tst_data[:, good_cols]
-    selector = SelectKBest(f_classif, k=4)
-    selector.fit(low_trn_data, trn_labels)
-    pvind = selector.pvalues_.argsort()
+    #selector = SelectKBest(f_classif, k=4)
+    #selector.fit(low_trn_data, trn_labels)
+    #pvind = selector.pvalues_.argsort()
 
     ##########
-    tst_labels = np.hstack(( np.zeros(lusc_inds.size-Ntrn), np.ones(luad_inds.size-Ntrn) ))
-    pvind2 = selector.pvalues_.argsort()
-    selector2 = SelectKBest(f_classif, k=4)
-    selector2.fit(low_tst_data, tst_labels)
+    #tst_labels = np.hstack(( np.zeros(lusc_inds.size-Ntrn0), np.ones(luad_inds.size-Ntrn1) ))
+    #pvind2 = selector.pvalues_.argsort()
+    #selector2 = SelectKBest(f_classif, k=4)
+    #selector2.fit(low_tst_data, tst_labels)
 
-    print low, high
-    print trn_data.shape[1]
-    print good_cols.sum()
-    print selector.pvalues_[pvind[:10]]
-    print selector.pvalues_[pvind[-10:]]
+    #print low, high
+    #print trn_data.shape[1]
+    #print good_cols.sum()
+    #print selector.pvalues_[pvind[:10]]
+    #print selector.pvalues_[pvind[-10:]]
 
-    print selector2.pvalues_[pvind2[:10]]
-    print selector2.pvalues_[pvind2[-10:]]
+    #print selector2.pvalues_[pvind2[:10]]
+    #print selector2.pvalues_[pvind2[-10:]]
     ###################
 
     rawdata = np.vstack(( low_trn_data, low_tst_data ))
@@ -451,7 +460,10 @@ if __name__ == '__main__':
 
     params = get_test_params()
     sel, raw, norm = get_data(data_tcga, params)
-    plot_p_hist(raw, sel, 'tcga low')
+    print(sel['tst'].sum(), sel['tst0'].sum(), sel['tst1'].sum())
+
+    sys.exit()
+    #plot_p_hist(raw, sel, 'tcga low')
 
     sel, raw, norm = get_data(data_karen, params)
     plot_p_hist(raw, sel, 'karen low')

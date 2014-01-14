@@ -9,7 +9,6 @@ def rho_matrix(p, diag, offdiag):
 def calc_avgs(db):
     D = db.mu.read()[0].size
     mumean = db.mu.read().mean()
-    muvar = db.mu.read().std(axis=0).mean()
     sigmean = db.sigma.read().mean(axis=0)
     return np.r_[mumean, sigmean[0,0], sigmean[1,1], sigmean[0,1]]
 
@@ -52,6 +51,7 @@ def calibrate(rawdata, sel, params):
     num_feat = params['num_feat']
     burn = params['burn']
     thin = params['thin']
+    c = params['c']
     d = params.get('d', 10)
 
     paramlog0 = np.empty((0,4), dtype=float)
@@ -69,7 +69,7 @@ def calibrate(rawdata, sel, params):
             mumove=params['mumove'],
             d=d,
             usepriors=False)
-        mpm = MPMCls(dist0, dist1) 
+        mpm = MPMCls(dist0, dist1, c=c) 
         mhmc = mh.MHRun(mpm, burn=burn, thin=thin, verbose=False)
         mhmc.sample(iters,verbose=False)
         paramlog0 = np.vstack(( paramlog0, calc_avgs(mhmc.db.root.object.dist0) ))

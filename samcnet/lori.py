@@ -371,7 +371,10 @@ class GaussianCls(Classifier):
 
     def approx_error_data(self, data, labels):
         preds = self.dist0.eval_posterior(data) - self.dist1.eval_posterior(data) + self.efactor < 0
-        return np.abs(preds-labels).sum()/float(labels.shape[0])
+        err0 = preds[labels==0].sum()/(labels.size - labels.sum())
+        err1 = (1-preds[labels==1]).sum()/labels.sum()
+        return self.Ec*err0 + (1-self.Ec)*err1
+        #return np.abs(preds-labels).sum()/float(labels.shape[0])
 
 def gen_dists():
     D = 4

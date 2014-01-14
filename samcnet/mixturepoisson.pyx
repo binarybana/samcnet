@@ -439,11 +439,13 @@ cdef class MPMCls:
         double Ec
         int lastmod  # Lastmod is a dirty flag that also tells us where we're dirty
 
-    def __init__(self, dist0, dist1):
+    def __init__(self, dist0, dist1, c=0.5):
         self.dist0 = dist0
         self.dist1 = dist1
         assert self.dist0.D == self.dist1.D, "Datasets must be of same featuresize"
-        self.Ec = self.dist0.n / (self.dist0.n + self.dist1.n)
+        if self.dist0.n != self.dist1.n and c==0.5:
+            print("WARNING: c=0.5 but training datasets are not of equal size.")
+        self.Ec = c
 
     def propose(self):
         """ 
@@ -506,7 +508,10 @@ cdef class MPMCls:
 
     def approx_error_data(self, db, data, labels, partial=False, numlam=10):
         preds = self.calc_gavg(db, data, partial, numlam=numlam) < 0
-        return np.abs(preds-labels).sum()/float(labels.shape[0])
+        err0 = preds[labels==0].sum()/(labels.size - labels.sum())
+        err1 = (1-preds[labels==1]).sum()/labels.sum()
+        print err0, err1, self.Ec
+        return self.Ec*err0 + (1-self.Ec)*err1
 
     def calc_gavg(self, db, pts, partial=False, numlam=10):
         if type(db) == str:
