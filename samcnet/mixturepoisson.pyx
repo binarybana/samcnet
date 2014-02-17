@@ -123,7 +123,7 @@ cdef class MPMDist:
 
         ##### Prior Quantities ######
         self.kappa = 10.0 if kappa is None else kappa
-        self.priorkappa = 10.0 if priorkappa is None else priorkappa
+        self.priorkappa = 50.0 if priorkappa is None else priorkappa
         self.S = np.eye(self.D) * (self.kappa-1-self.D) if S is None else S.copy()
         self.logdetS = log(np.linalg.det(self.S))
         self.comp_geom = 0.6 if comp_geom is None else comp_geom
@@ -505,6 +505,9 @@ cdef class MPMCls:
         """ 
         self.dist0.save_iter_db(db, node.dist0)
         self.dist1.save_iter_db(db, node.dist1)
+
+    def predict(self, db, data, partial=False, numlam=10):
+        return (self.calc_gavg(db, data, partial, numlam=numlam) > 0)*1
 
     def approx_error_data(self, db, data, labels, partial=False, numlam=10):
         preds = self.calc_gavg(db, data, partial, numlam=numlam) < 0
