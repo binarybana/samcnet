@@ -1,12 +1,16 @@
 ## SAMCNet
 
+### Update: February 2014
+
+A video tutorial explaining how to operate the classifier on your RNA-Seq 
+dataset has been posted at: http://www.youtube.com/watch?v=fPa5qy1tdhY
+
 SAMCNet is a toolkit and demonstration for Bayesian model averaging over 
 objective functions defined over model classes of interest.
 
 Particularly, it currently handles classification of RNA-Seq data using a 
-(submitted) statistical model that shows good performance in comparison to 
-SVM, LDA, and others. Video tutorials explaining how to operate the 
-classifier on your RNA-Seq dataset will be posted here in short order.
+(submitted for publication) statistical model that shows good performance in 
+comparison to SVM, LDA, and others. 
 
 Also, we can use a model class of discrete, static Bayesian 
 networks defined over the variables of interest. Then we can use objective functions 
