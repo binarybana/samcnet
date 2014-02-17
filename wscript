@@ -21,16 +21,17 @@ def configure(conf):
     conf.check_python_module('pandas')
     conf.env.append_value('LINKFLAGS', '-L%s/lib' % conf.path.abspath())
     conf.env.append_value('LINKFLAGS', '-L/share/apps/lib')
-    conf.check(compiler='cc', lib='Judy', uselib_store='JUDY')
+    #conf.check(compiler='cc', lib='Judy', uselib_store='JUDY')
     conf.check(compiler='cc', lib='m', uselib_store='MATH')
     #conf.check(compiler='cc', lib='profiler', uselib_store='PROF')
-    conf.check_cxx(lib='gmp', uselib_store='GMP')
-    conf.check_cxx(lib='gmpxx', uselib_store='GMPXX')
-    conf.env.append_value('LINKFLAGS', '-lgmpxx')
-    conf.check_cxx(lib='dai', uselib_store='DAI')
+    #conf.check_cxx(lib='gmp', uselib_store='GMP')
+    #conf.check_cxx(lib='gmpxx', uselib_store='GMPXX')
+    #conf.env.append_value('LINKFLAGS', '-lgmpxx')
+    #conf.check_cxx(lib='dai', uselib_store='DAI')
 
 def build(bld):
-    libs = 'JUDY MATH'.split()
+    libs = 'MATH'.split()
+    #libs = 'JUDY MATH'.split()
     includes = ['-I/share/apps/include']
 
     CFLAGS = ['-Wall','-std=c99'] + includes
@@ -57,19 +58,19 @@ def build(bld):
 
     bld.env['PREFIX'] = '.'
 
-    bld.shlib(source = bld.path.ant_glob('samcnet/netcost/*.c'), 
-        target='cost', 
-        cflags=CFLAGS,
-        linkflags=LDFLAGS,
-        use=libs)
+    #bld.shlib(source = bld.path.ant_glob('samcnet/netcost/*.c'), 
+        #target='cost', 
+        #cflags=CFLAGS,
+        #linkflags=LDFLAGS,
+        #use=libs)
 
-    bld(features='c cshlib pyext',
-        source=['samcnet/samc.pyx'],
-        includes=[],
-        libpath=['.','./build'],
-        cflags=CFLAGS,
-        ldflags=LDFLAGS,
-        target='samc')
+    #bld(features='c cshlib pyext',
+        #source=['samcnet/samc.pyx'],
+        #includes=[],
+        #libpath=['.','./build'],
+        #cflags=CFLAGS,
+        #ldflags=LDFLAGS,
+        #target='samc')
 
     bld(features='c cshlib pyext',
         source=['samcnet/mh.pyx'],
@@ -105,7 +106,7 @@ def build(bld):
         #ldflags=LDFLAGS,
         #target='probability')
 
-    libs = ['MATH', 'DAI', 'GMP', 'GMPXX']
+    #libs = ['MATH', 'DAI', 'GMP', 'GMPXX']
 
     #bld(features='c cshlib cxx pyext',
         #source=['samcnet/bayesnetcpd.pyx', 'samcnet/utils.cpp'],
