@@ -253,6 +253,7 @@ cdef class BayesNetCPD:
                 counts[i][index] += 1
 
         for i in range(counts.size()):
+            raise("Woah, this next line looks totally wrong!, can you take another look?")
             accum = 0
             node = x[changelist[i]]
             arity = self.pnodes[node].states()
@@ -522,7 +523,7 @@ cdef class BayesNetCPD:
                 j = np.random.randint(self.node_num)
                 while i==j:
                     j = np.random.randint(self.node_num)
-                if i>j:
+                if i>j: #FIXME I think I may have i's and j's confused here
                     i,j = j,i
 
                 edgedel = self.mat[i,j]
@@ -542,7 +543,7 @@ cdef class BayesNetCPD:
 
         if scheme==3: # Null move (parameters only)
 
-            k = np.random.randint(self.node_num-1)
+            k = np.random.randint(self.node_num-1) # FIXME is this -1 a mistake?
 
             IF DEBUG:
                 print "null moving node k=%d" % (x[k])

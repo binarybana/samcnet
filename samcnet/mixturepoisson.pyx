@@ -144,7 +144,7 @@ cdef class MPMDist:
             np.linalg.cholesky(self.S)
         except np.linalg.LinAlgError:
             sys.stderr.write("Singular S matrix\n")
-            sys.stderr.write(str(S))
+            sys.stderr.write(str(self.S))
             sys.stderr.flush()
             raise
 
@@ -508,6 +508,27 @@ cdef class MPMCls:
 
     def predict(self, db, data, partial=False, numlam=10):
         return (self.calc_gavg(db, data, partial, numlam=numlam) > 0)*1
+
+    def bee(self, db):
+        ranges = self.get_domain(db)
+        def slow_method(*args):
+            pt = np.array(args)
+            return self.calc_gavg(db, pt)
+        import scipy.integrate as spint
+
+        return spint.nquad(slow_method, ranges)
+        #self.calc_gavg(db, pts) # or do I need the g0 and g1?
+        ## Hmm.. what integration machinery can I bring to bear here, surely
+        ## scipy has something
+        #bee = integrate(...)
+        #return bee
+
+    def get_domain(self, db):
+        d0 = db.root.object.dist0
+        d1 = db.root.object.dist1
+        mumax = np.vstack((d1.mu.read().max(axis=0).T + np.diag(d1.sigma.read().max(axis=0)) , d0.mu.read().max(axis=0).T + np.diag(d0.sigma.read().max(axis=0)))).max(axis=0)
+        mumin = np.vstack((d1.mu.read().min(axis=0).T - np.diag(d1.sigma.read().max(axis=0)) , d0.mu.read().min(axis=0).T - np.diag(d0.sigma.read().max(axis=0)))).max(axis=0)
+        return zip(list(mumin), list(mumax))
 
     def approx_error_data(self, db, data, labels, partial=False, numlam=10):
         preds = self.calc_gavg(db, data, partial, numlam=numlam) < 0

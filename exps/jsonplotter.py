@@ -51,11 +51,14 @@ markers = list('xD*o>s^<+')
 colors = list('bgrcmy')
 offset = 0
 key = {'gauss':'Normal OBC', 'svm':'RBF SVM', 'knn':'3NN', 'lda':'LDA', 'mpm':'MP OBC',
-        'mpm_prior':'MP OBC Prior', 'mpmc_calib':'MP OBC Calibrated'}
+        'mpm_prior':'MP OBC Prior', 'mpmc_calib':'MP OBC Calibrated',
+        'nngauss': 'NN Normal OBC', 'nnsvm': 'NN RBF SVM', 'nnlda': 'NN LDA', 'nnknn': 'NN 3NN'}
 colorkey = {'gauss':'b', 'svm':'y', 'knn':'g', 'lda':'r', 'mpm':'c',
-        'mpm_prior':'k', 'mpmc_calib':'m'}
+        'mpm_prior':'k', 'mpmc_calib':'m',
+        'nngauss':'b', 'nnsvm': 'y', 'nnlda': 'r', 'nnknn': 'g'}
 symkey = {'gauss':'x', 'svm':'^', 'knn':'D', 'lda':'*', 'mpm':'o',
-        'mpm_prior':'+', 'mpmc_calib':'s'}
+        'mpm_prior':'+', 'mpmc_calib':'s',
+        'nngauss':'o', 'nnsvm': 'x', 'nnlda': '^', 'nnknn': '+'}
 
 def adjust_plot():
     lx,ux,ly,uy = p.axis()
@@ -69,7 +72,7 @@ df.sort_index(axis=1)
 offset = 0
 p.figure()
 for i in range(len(df.columns)):
-    if df.columns[i] == 'mpm_prior' or df.columns[i] == 'gauss':
+    if df.columns[i] == 'mpm_prior':# or df.columns[i] == 'gauss':
         continue
     means = [alldata[j].mean()[i] for j in dependent_var[ind]]
     stds = [alldata[j].std()[i] for j in dependent_var[ind]]

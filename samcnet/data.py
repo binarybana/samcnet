@@ -63,7 +63,7 @@ def data_yj(params):
         fid = os.fdopen(fid,'w')
         fid.write(YJparams)
         fid.close()
-        inspec = 'gen -i params/%s -sr 0.05 -lr %f -hr %f -seed %d' % \
+        inspec = 'gen -i params/%s -c 0.05 -l %f -h %f -s %d' % \
                 (fname, lowd, highd, seed)
         spec = path.join(synloc, inspec).split()
         sb.check_call(spec)
@@ -84,6 +84,8 @@ def data_yj(params):
 
         raw_tst_data = np.loadtxt(tst_path,
                 delimiter=',', skiprows=1)
+    except Exception as e:
+        print "ERROR in data_yj: " + str(e)
     finally:
         os.remove(trn_path)
         os.remove(tst_path)
@@ -104,9 +106,7 @@ def data_yj(params):
 def gen_data(mu, cov, n, lowd, highd):
     lams = MVNormal(mu, cov).rvs(n)
     ps = np.empty_like(lams)
-    for i in xrange(lams.shape[0]):
-        for j in xrange(lams.shape[1]):
-            ps[i,j] = di.poisson.rvs(di.uniform.rvs(lowd,highd-lowd)* np.exp(lams[i,j]))
+    ps = di.poisson.rvs(di.uniform.rvs(lowd,highd-lowd,size=lams.shape) * np.exp(lams))
     return ps
 
 def data_jk(params):
@@ -159,17 +159,17 @@ def data_jk(params):
 
     trn0, trn1, tst0, tst1 = gen_labels(Ntrn, Ntrn, Ntst, Ntst)
 
-    selector = SelectKBest(f_classif, k=num_feat)
-    trn_data = np.vstack(( trn_data0, trn_data1 ))
-    trn_labels = np.hstack(( np.zeros(Ntrn), np.ones(Ntrn) ))
-    selector.fit(trn_data, trn_labels)
-    pvind = selector.pvalues_.argsort()
+    #selector = SelectKBest(f_classif, k=num_feat)
+    #trn_data = np.vstack(( trn_data0, trn_data1 ))
+    #trn_labels = np.hstack(( np.zeros(Ntrn), np.ones(Ntrn) ))
+    #selector.fit(trn_data, trn_labels)
+    #pvind = selector.pvalues_.argsort()
 
-    np.random.shuffle(pvind)
+    #np.random.shuffle(pvind)
 
     feats = np.zeros(rawdata.shape[1], dtype=bool)
-    feats[pvind[:num_feat]] = True
-    #feats[:num_feat] = True
+    #feats[pvind[:num_feat]] = True
+    feats[:num_feat] = True
     calib = ~feats
     return rawdata, trn0, trn1, tst0, tst1, feats, calib
 
@@ -394,18 +394,25 @@ def get_data(method, params):
     tstl = (tst0*1 + tst1*2 - 1)[tst]
 
     num_calibs = setv(params, 'num_calibs', 5, int)
-    size_calibs = setv(params, 'size_calibs', 2, int)
 
-    subcalibs = calib.nonzero()[0]
-    clip_calibs = subcalibs.size - (num_calibs * size_calibs)
-    assert clip_calibs >= 0, clip_calibs
-    np.random.shuffle(subcalibs)
-    subcalibs = np.split(subcalibs[:-clip_calibs], num_calibs)
+    if num_calibs == 0 or params['num_gen_feat'] == params['num_feat']:
+        # This should really be done cleaner, but I can accrue a little
+        # technical debt every now and then right?... right?!
+        sel = dict(trn0=trn0, trn1=trn1, trn=trn, tst0=tst0, tst1=tst1, tst=tst, 
+                tstl=tstl, trnl=trnl)
+    else:
+        size_calibs = setv(params, 'size_calibs', 2, int)
 
-    sel = dict(trn0=trn0, trn1=trn1, trn=trn, tst0=tst0, tst1=tst1, tst=tst, 
-            feats=feats, calib=calib,
-            tstl=tstl, trnl=trnl,
-            subcalibs=subcalibs)
+        subcalibs = calib.nonzero()[0]
+        clip_calibs = subcalibs.size - (num_calibs * size_calibs)
+        assert clip_calibs >= 0, clip_calibs
+        np.random.shuffle(subcalibs)
+        subcalibs = np.split(subcalibs[:-clip_calibs], num_calibs)
+        sel = dict(trn0=trn0, trn1=trn1, trn=trn, tst0=tst0, tst1=tst1, tst=tst, 
+                feats=feats, calib=calib,
+                tstl=tstl, trnl=trnl,
+                subcalibs=subcalibs)
+
     # Normalize
     mu = rawdata[trn,:].mean(axis=0)
     std = np.sqrt(rawdata[trn,:].var(axis=0, ddof=1))
