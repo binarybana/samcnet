@@ -17,7 +17,7 @@ def configure(conf):
     conf.check_python_headers()
     conf.check_python_module('numpy')
     conf.check_python_module('scipy')
-    conf.check_python_module('networkx')
+    #conf.check_python_module('networkx')
     conf.check_python_module('pandas')
     conf.env.append_value('LINKFLAGS', '-L%s/lib' % conf.path.abspath())
     conf.env.append_value('LINKFLAGS', '-L/share/apps/lib')
