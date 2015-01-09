@@ -1,23 +1,20 @@
 ## SAMCNet
 
-### Update: February 2014
+This package started as a toolkit and demonstration of Bayesian model averaging 
+applied to a class of graphical models known as Bayesian networks. I then added 
+functionality to perform optimal Bayesian Classification for a publication 
+[[Knight, Ivanov, Dougherty 
+2014]](http://www.biomedcentral.com/bmcbioinformatics/mostviewed/30days).
+In other words, it can handle classification of RNA-Seq data using a the 
+published statistical model that shows superior performance when compared to 
+nonlinear SVM, LDA, and others. 
 
-A video tutorial explaining how to operate the classifier on your RNA-Seq 
-dataset has been posted at: http://www.youtube.com/watch?v=fPa5qy1tdhY
-
-SAMCNet is a toolkit and demonstration for Bayesian model averaging over 
-objective functions defined over model classes of interest.
-
-Particularly, it currently handles classification of RNA-Seq data using a 
-(submitted for publication) statistical model that shows good performance in 
-comparison to SVM, LDA, and others. 
-
-Also, we can use a model class of discrete, static Bayesian 
-networks defined over the variables of interest. Then we can use objective functions 
-to simplify the complex posterior over this large model class.
-
-I'll go more into detail regarding the theory, code, and applications once the paper
-is published.
+Both of these functionalities still work, although for cutting edge 
+development, effort has moved over to the Julia ports for classification 
+[(OBC.jl)](https://github.com/binarybana/OBC.jl), network inference
+[(MCBN.jl)](https://github.com/binarybana/MCBN.jl), and a package split off to 
+contain the MCMC methods at the API resolution I needed 
+[(SAMC.jl)](https://github.com/binarybana/SAMC.jl).
 
 ## Installing
 In a recent version of Ubuntu you'll need the following:
@@ -41,6 +38,11 @@ Then test with
 ```
 python -m tests.test_net
 ```
+
+### Usage
+
+A video tutorial explaining how to operate the classifier on your RNA-Seq 
+dataset has been posted at: http://www.youtube.com/watch?v=fPa5qy1tdhY
 
 ## Building Blocks
 
