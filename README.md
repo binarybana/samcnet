@@ -17,18 +17,12 @@ contain the MCMC methods at the API resolution I needed
 [(SAMC.jl)](https://github.com/binarybana/SAMC.jl).
 
 ## Installing
-In a recent version of Ubuntu you'll need the following:
+In order to use the classification component of the library, in a recent 
+version of Ubuntu you'll need the following:
 ```
-sudo apt-get install cython python-pandas python-numpy python-scipy 
-python-networkx libboost-dev libboost-program-options-dev libboost-test-dev 
-libjudy-dev libgmp-dev
-git clone git@github.com:binarybana/samcnet.git
-git submodule update --init
-cd deps/libdai
-make -j
-cd ../..
-ln -s ../deps/libdai/lib/libdai.so lib/
-for f in build/*.so; ln -s ../$f samcnet/; done
+sudo apt-get install cython python-pandas python-numpy python-scipy git clone 
+git://github.com/binarybana/samcnet.git
+cd samcnet
 ./waf configure
 ./waf
 export LD_LIBRARY_PATH=lib:build
@@ -36,13 +30,34 @@ export LD_LIBRARY_PATH=lib:build
 
 Then test with
 ```
-python -m tests.test_net
+python -m tests.example
 ```
 
 ### Usage
 
 A video tutorial explaining how to operate the classifier on your RNA-Seq 
 dataset has been posted at: http://www.youtube.com/watch?v=fPa5qy1tdhY
+
+
+### Network Inference (Deprecated)
+
+If you'd like to use the network inference component, I highly recommend using 
+the (non-abandoned) Julia port 
+[(MCBN.jl)](https://github.com/binarybana/MCBN.jl), but if you'd like to try 
+this it'd look something like the following:
+
+```
+sudo apt-get install python-networkx libboost-dev libboost-program-options-dev 
+libboost-test-dev libjudy-dev libgmp-dev python-networkx
+cd samcnet
+git submodule update --init
+cd deps/libdai
+cp Makefile.LINUX Makefile.conf
+make -j
+cd ../..
+ln -s ../deps/libdai/lib/libdai.so lib/
+for f in build/*.so; ln -s ../$f samcnet/; done
+```
 
 ## Building Blocks
 
