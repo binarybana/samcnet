@@ -4,7 +4,7 @@ This package started as a toolkit and demonstration of Bayesian model averaging
 applied to a class of graphical models known as Bayesian networks. I then added 
 functionality to perform optimal Bayesian Classification for a publication 
 [[Knight, Ivanov, Dougherty 
-2014]](http://www.biomedcentral.com/bmcbioinformatics/mostviewed/30days).
+2014]](http://www.biomedcentral.com/1471-2105/15/401).
 In other words, it can handle classification of RNA-Seq data using a the 
 published statistical model that shows superior performance when compared to 
 nonlinear SVM, LDA, and others. 
